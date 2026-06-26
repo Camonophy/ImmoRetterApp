@@ -1,0 +1,29 @@
+# Kleinanzeigen.de Real Estate Scraper Dependencies
+
+# Core dependencies
+requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+pandas==2.1.4
+openpyxl==3.1.2
+python-dateutil==2.8.2
+python-dotenv==1.0.0
+
+# Optional: For dynamic content scraping
+selenium==4.15.2
+webdriver-manager==4.0.0
+
+# For user agent rotation
+fake-useragent==1.4.0
+
+# For better date parsing
+pytz==2023.3.post1
+
+# For CLI interface
+click==8.1.7
+
+# For progress bars
+tqdm==4.66.1
+
+# For logging
+colorlog==6.8.0
