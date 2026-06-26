@@ -5,7 +5,7 @@ Utility functions for Kleinanzeigen Scraper
 import random
 import re
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List
 from dateutil.parser import parse as parse_date
 from dateutil.relativedelta import relativedelta
 
@@ -37,6 +37,30 @@ def generate_search_url(bundesland_url_param: str, page: int = 1) -> str:
         return f"{base_url}{search_path}"
     else:
         return f"{base_url}{search_path}?o={page}"
+
+
+def generate_all_category_urls(bundesland_url_param: str, page: int = 1) -> List[str]:
+    """
+    Generate search URLs for all real estate subcategories
+    
+    Args:
+        bundesland_url_param: URL parameter for the Bundesland
+        page: Page number (1-based)
+    
+    Returns:
+        List of URLs for all real estate subcategories
+    """
+    base_url = Settings.BASE_URL.rstrip("/")
+    urls = []
+    
+    for subcat in Settings.REAL_ESTATE_SUBCATEGORIES:
+        search_path = f"/s-immobilien/{bundesland_url_param}/{subcat}"
+        if page == 1:
+            urls.append(f"{base_url}{search_path}")
+        else:
+            urls.append(f"{base_url}{search_path}?o={page}")
+    
+    return urls
 
 
 def parse_kleinanzeigen_date(date_str: str) -> Optional[datetime]:
@@ -219,7 +243,7 @@ def normalize_price(price_str: str) -> Optional[str]:
     
     # Remove currency symbols and whitespace
     price_str = price_str.strip()
-    price_str = re.sub(r"[€$\s]", "", price_str)
+    price_str = re.sub(r"[\u20ac$\\s]", "", price_str)
     
     # Replace comma with dot for decimal
     price_str = price_str.replace(",", ".")
@@ -241,3 +265,99 @@ def normalize_location(location_str: str) -> Optional[str]:
         return None
     
     return location_str.strip()
+
+
+def fetch_listing_date(listing_url: str, session=None) -> Optional[str]:
+    """
+    Fetch the posting date from a Kleinanzeigen listing detail page
+    
+    Args:
+        listing_url: URL of the listing detail page
+        session: Optional requests.Session to use
+    
+    Returns:
+        Date string or None if not found
+    """
+    import requests
+    from bs4 import BeautifulSoup
+    import time
+    import random
+    
+    if not listing_url:
+        return None
+    
+    # Ensure full URL
+    if not listing_url.startswith('http'):
+        listing_url = f"{Settings.BASE_URL}{listing_url}"
+    
+    try:
+        # Use provided session or create a new one
+        if session:
+            sess = session
+        else:
+            sess = requests.Session()
+            sess.headers.update(Settings.DEFAULT_HEADERS)
+            sess.headers.update({"User-Agent": get_random_user_agent()})
+        
+        # Random delay to avoid rate limiting
+        delay = random.uniform(0.5, 1.5)
+        time.sleep(delay)
+        
+        response = sess.get(listing_url, timeout=Settings.REQUEST_TIMEOUT)
+        
+        if response.status_code != 200:
+            return None
+        
+        soup = BeautifulSoup(response.text, 'lxml')
+        
+        # Look for date in various locations
+        # Pattern 1: <i class="icon icon-small icon-calendar-gray-simple"></i><span>DATE</span>
+        date_span = soup.select_one('i.icon-calendar-gray-simple + span')
+        if date_span:
+            return date_span.get_text(strip=True)
+        
+        # Pattern 2: <i class="icon icon-small icon-calendar-open"></i> DATE
+        calendar_icons = soup.select('i.icon-calendar-open')
+        for icon in calendar_icons:
+            # Get next sibling
+            next_sib = icon.find_next_sibling()
+            if next_sib and next_sib.name == 'span':
+                return next_sib.get_text(strip=True)
+            elif next_sib and next_sib.string:
+                return next_sib.string.strip()
+        
+        # Pattern 3: Look for any date-like text near calendar icons
+        calendar_icons = soup.select('i.icon-calendar')
+        for icon in calendar_icons:
+            parent = icon.parent
+            if parent:
+                text = parent.get_text(strip=True)
+                # Try to extract date from parent text
+                date_match = re.search(r'(\d{1,2}\.\d{1,2}\.\d{4})', text)
+                if date_match:
+                    return date_match.group(1)
+        
+        # Pattern 4: Look for data-testid attributes
+        date_element = soup.select_one('[data-testid="ad-date"]')
+        if date_element:
+            return date_element.get_text(strip=True)
+        
+        # Pattern 5: Look for time elements
+        time_elements = soup.select('time')
+        for time_el in time_elements:
+            date_text = time_el.get_text(strip=True)
+            if date_text:
+                return date_text
+        
+        # Pattern 6: Look for any text that looks like a date
+        # Search in the entire page text
+        text = soup.get_text()
+        date_match = re.search(r'(Heute|Gestern|vor \d+ (Tagen|Wochen|Monaten|Jahren)|\d{1,2}\.\d{1,2}\.\d{4})', text)
+        if date_match:
+            return date_match.group(1)
+        
+    except Exception as e:
+        # Silently fail - we'll just return None
+        pass
+    
+    return None

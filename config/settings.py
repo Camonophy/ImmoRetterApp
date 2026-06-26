@@ -12,11 +12,13 @@ class Settings:
     
     # Base URLs
     BASE_URL = "https://www.kleinanzeigen.de"
-    SEARCH_PATH = "/s-immobilien/{region}/k0"
+    # Use the base immobilien path without category filter
+    # This will return all real estate listings for the region
+    SEARCH_PATH = "/s-immobilien/{region}"
     
     # Request configuration
-    REQUEST_DELAY: Tuple[int, int] = (2, 5)  # Random delay between requests in seconds
-    MAX_PAGES = 100  # Maximum pages to scrape (safety limit)
+    REQUEST_DELAY: Tuple[int, int] = (1, 3)  # Random delay between requests in seconds (reduced for faster scraping)
+    MAX_PAGES = 50  # Maximum pages to scrape (safety limit, reduced from 100)
     REQUEST_TIMEOUT = 30  # Request timeout in seconds
     MAX_RETRIES = 3  # Maximum retries for failed requests
     
@@ -58,6 +60,18 @@ class Settings:
     
     # Kleinanzeigen specific
     REAL_ESTATE_CATEGORY = "k0"  # All real estate categories
+    
+    # Real estate subcategories to scrape
+    REAL_ESTATE_SUBCATEGORIES = [
+        "c198",  # Gewerbeimmobilien
+        "c199",  # Wohnungen
+        "c200",  # Häuser
+        "c201",  # Zimmer
+        "c202",  # WG
+        "c203",  # Grundstücke
+        "c204",  # Garagen/Stellplätze
+        "c205",  # Ferienwohnungen
+    ]
     
     # Validate and create directories
     @classmethod

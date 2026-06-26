@@ -16,7 +16,8 @@ from .models import Listing, ScrapeResult
 from .utils import (
     parse_kleinanzeigen_date,
     get_random_user_agent,
-    generate_search_url,
+    generate_all_category_urls,
+    fetch_listing_date,
 )
 from config.settings import Settings
 
@@ -126,6 +127,12 @@ class KleinanzeigenScraper:
                     if not url.startswith("http"):
                         url = f"{self.settings.BASE_URL}{url}"
             
+            # Try data-href attribute (used in modern Kleinanzeigen)
+            if not url:
+                url = card.get("data-href")
+                if url and not url.startswith("http"):
+                    url = f"{self.settings.BASE_URL}{url}"
+            
             if not url:
                 logger.debug("Could not extract URL from listing card")
                 return None
@@ -134,28 +141,49 @@ class KleinanzeigenScraper:
             price_element = card.select_one("[data-testid='ad-price']")
             if not price_element:
                 price_element = card.select_one(".price")
+            if not price_element:
+                price_element = card.select_one(".aditem-main--middle--price-shipping--price")
             price = price_element.get_text(strip=True) if price_element else None
             
             # Extract location
             location_element = card.select_one("[data-testid='ad-location']")
             if not location_element:
                 location_element = card.select_one(".location")
-            location = location_element.get_text(strip=True) if location_element else None
+            if not location_element:
+                location_element = card.select_one(".aditem-main--top--left")
+            if location_element:
+                # Clean up location text (remove icons, etc.)
+                location = location_element.get_text(strip=True)
+                # Remove location icon text if present
+                location = location.replace("\u200b", "").strip()
+            else:
+                location = None
             
-            # Extract date - THIS IS CRITICAL FOR FILTERING
+            # Extract date - dates are not in the search results HTML (loaded via JS)
+            # We'll set date_posted to None initially and fetch it from the detail page later
+            date_posted = None
+            date_parsed = None
+            
+            # Try to extract from card anyway (might work for some layouts)
             date_element = card.select_one("[data-testid='ad-date']")
             if not date_element:
-                # Try different selectors for date
                 date_element = card.select_one(".date")
             if not date_element:
-                date_element = card.select_one("small")
-            if not date_element:
-                date_element = card.select_one("span:last-child")
+                # Look for calendar icon followed by date
+                calendar_icon = card.select_one("i.icon-calendar")
+                if calendar_icon:
+                    # Get next sibling or parent's text
+                    parent = calendar_icon.parent
+                    if parent:
+                        text = parent.get_text(strip=True)
+                        # Try to find a date in the text
+                        import re
+                        date_match = re.search(r'(Heute|Gestern|vor \d+ (Tagen|Wochen|Monaten|Jahren)|\d{1,2}\.\d{1,2}\.\d{4})', text)
+                        if date_match:
+                            date_posted = date_match.group(1)
             
-            date_posted = date_element.get_text(strip=True) if date_element else None
-            
-            # Parse date and create listing
-            date_parsed = parse_kleinanzeigen_date(date_posted) if date_posted else None
+            if date_posted:
+                date_parsed = parse_kleinanzeigen_date(date_posted)
             
             listing = Listing(
                 title=title,
@@ -171,6 +199,50 @@ class KleinanzeigenScraper:
         except Exception as e:
             logger.error(f"Error parsing listing card: {e}")
             return None
+    
+    def _fetch_listing_dates(self, listings: List[Listing]) -> List[Listing]:
+        """
+        Fetch posting dates from listing detail pages for listings that don't have dates
+        
+        Args:
+            listings: List of Listing objects
+        
+        Returns:
+            Updated list of Listing objects with dates fetched
+        """
+        updated_listings = []
+        
+        for i, listing in enumerate(listings):
+            # If we already have a date, skip
+            if listing.date_posted or listing.date_parsed:
+                updated_listings.append(listing)
+                continue
+            
+            # Fetch date from detail page
+            date_str = fetch_listing_date(listing.url, self.session)
+            
+            if date_str:
+                date_parsed = parse_kleinanzeigen_date(date_str)
+                # Create a new listing with the date
+                listing = Listing(
+                    title=listing.title,
+                    url=listing.url,
+                    price=listing.price,
+                    location=listing.location,
+                    date_posted=date_str,
+                    date_parsed=date_parsed,
+                )
+            
+            updated_listings.append(listing)
+            
+            # Log progress every 10 listings
+            if (i + 1) % 10 == 0:
+                logger.info(f"Fetched dates for {i + 1}/{len(listings)} listings...")
+            
+            # Small delay between requests
+            time.sleep(0.3)
+        
+        return updated_listings
     
     def _extract_listings_from_page(self, html: str) -> List[Listing]:
         """
@@ -232,13 +304,13 @@ class KleinanzeigenScraper:
         try:
             soup = BeautifulSoup(html, "lxml")
             
-            # Look for next page link
+            # Look for next page link - Kleinanzeigen uses different formats
             next_selectors = [
                 "a[rel='next']",
                 "[data-testid='pagination-next']",
                 ".pagination-next",
-                "a:contains('Weiter')",
-                "a:contains('Nächste')",
+                "a[title='Nächste']",
+                "a[title='Weiter']",
             ]
             
             for selector in next_selectors:
@@ -248,7 +320,23 @@ class KleinanzeigenScraper:
             
             # Check if current page is less than max pages
             if current_page < self.settings.MAX_PAGES:
-                # Try to find page numbers and see if there's a higher one
+                # Try to find page number links
+                # Kleinanzeigen uses different pagination formats:
+                # 1. /s-.../seite:2/...
+                # 2. ?o=2
+                page_links = soup.select("a[href*='seite:']")
+                for link in page_links:
+                    href = link.get("href", "")
+                    # Extract page number from /seite:N/ format
+                    if "seite:" in href:
+                        try:
+                            page_num = int(href.split("seite:")[1].split("/")[0])
+                            if page_num > current_page:
+                                return True
+                        except ValueError:
+                            pass
+                
+                # Also check for ?o=N format
                 page_links = soup.select("a[href*='o=']")
                 for link in page_links:
                     href = link.get("href", "")
@@ -267,17 +355,19 @@ class KleinanzeigenScraper:
             logger.error(f"Error checking for next page: {e}")
             return False
     
-    def _should_continue_pagination(self, listings: List[Listing]) -> bool:
+    def _should_continue_pagination(self, listings: List[Listing], has_next_page: bool) -> bool:
         """
         Determine if we should continue to the next page
         
         We stop pagination when:
         1. We've reached the max pages limit
-        2. All listings on the current page are newer than 3 months
+        2. There's no next page
+        3. We have enough listings with dates and all are newer than 3 months
            (since results are sorted by date, newest first)
         
         Args:
             listings: Listings from current page
+            has_next_page: Whether there's a next page available
         
         Returns:
             True if we should continue
@@ -285,18 +375,24 @@ class KleinanzeigenScraper:
         if not listings:
             return False
         
-        # If all listings are newer than 3 months, we can stop
-        # (assuming results are sorted by date, newest first)
-        all_new = all(
-            not listing.is_older_than_3_months 
-            for listing in listings 
-            if listing.date_parsed
-        )
-        
-        if all_new and len(listings) > 0:
-            logger.info("All listings on page are newer than 3 months. Stopping pagination.")
+        # If there's no next page, stop
+        if not has_next_page:
             return False
         
+        # If we have listings with dates and all are newer than 3 months, stop
+        listings_with_dates = [l for l in listings if l.date_parsed]
+        
+        if listings_with_dates:
+            all_new = all(
+                not listing.is_older_than_3_months 
+                for listing in listings_with_dates
+            )
+            
+            if all_new:
+                logger.info("All listings on page with dates are newer than 3 months. Stopping pagination.")
+                return False
+        
+        # Otherwise, continue
         return True
     
     def scrape_bundesland(self, bundesland: str, bundesland_url_param: str) -> ScrapeResult:
@@ -317,36 +413,55 @@ class KleinanzeigenScraper:
         
         logger.info(f"Starting scrape for {bundesland}...")
         
-        page = 1
-        while page <= self.settings.MAX_PAGES:
-            # Generate URL for current page
-            url = generate_search_url(bundesland_url_param, page)
-            logger.info(f"Scraping page {page}: {url}")
-            
-            # Fetch the page
-            html = self._make_request(url)
-            if html is None:
-                result.errors.append(f"Failed to fetch page {page}")
-                break
-            
-            # Extract listings from page
-            listings = self._extract_listings_from_page(html)
-            result.listings.extend(listings)
-            result.total_listings_found += len(listings)
-            result.pages_scraped = page
-            
-            logger.info(f"Found {len(listings)} listings on page {page}")
-            
-            # Check if we should continue
-            if not self._should_continue_pagination(listings):
-                break
-            
-            # Check if there's a next page
-            if not self._has_next_page(html, page):
-                logger.info("No more pages available")
-                break
-            
-            page += 1
+        # Generate all category URLs
+        category_urls = generate_all_category_urls(bundesland_url_param)
+        logger.info(f"Scraping {len(category_urls)} real estate categories...")
+        
+        # Scrape each category
+        for cat_url in category_urls:
+            page = 1
+            while page <= self.settings.MAX_PAGES:
+                # Generate URL for current page
+                if page == 1:
+                    url = cat_url
+                else:
+                    # Try to use the same pagination format as the first page
+                    # If the first page URL has /seite:1/, use /seite:N/
+                    # Otherwise, use ?o=N
+                    if "/seite:" in cat_url:
+                        # Replace /seite:1/ with /seite:N/
+                        url = cat_url.replace("/seite:1/", f"/seite:{page}/")
+                    else:
+                        url = f"{cat_url}?o={page}" if "?" not in cat_url else f"{cat_url}&o={page}"
+                
+                logger.info(f"Scraping page {page} of category {cat_url.split('/')[-1]}: {url}")
+                
+                # Fetch the page
+                html = self._make_request(url)
+                if html is None:
+                    result.errors.append(f"Failed to fetch page {page} of {cat_url}")
+                    break
+                
+                # Extract listings from page
+                listings = self._extract_listings_from_page(html)
+                result.listings.extend(listings)
+                result.total_listings_found += len(listings)
+                result.pages_scraped = page
+                
+                logger.info(f"Found {len(listings)} listings on page {page} of {cat_url.split('/')[-1]}")
+                
+                # Check if there's a next page
+                has_next_page = self._has_next_page(html, page)
+                
+                # Check if we should continue
+                if not self._should_continue_pagination(listings, has_next_page):
+                    break
+                
+                page += 1
+        
+        # Fetch dates for listings that don't have them
+        logger.info(f"Fetching dates for {len(result.listings)} listings...")
+        result.listings = self._fetch_listing_dates(result.listings)
         
         # Filter for old listings
         old_listings = result.get_old_listings()
