@@ -1,0 +1,43 @@
+2026-06-26 20:29:38,174 - __main__ - INFO - Starting scrape for: Nordrhein-Westfalen
+2026-06-26 20:29:38,174 - scraper.kleinanzeigen - INFO - Starting scrape for Nordrhein-Westfalen...
+2026-06-26 20:29:38,175 - scraper.kleinanzeigen - INFO - Scraping page 1: https://www.kleinanzeigen.de/s-immobilien/nordrhein-westfalen/k0
+2026-06-26 20:29:42,115 - scraper.kleinanzeigen - ERROR - Error extracting listings from page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-26 20:29:42,115 - scraper.kleinanzeigen - INFO - Found 0 listings on page 1
+2026-06-26 20:29:42,115 - scraper.kleinanzeigen - INFO - Completed scrape for Nordrhein-Westfalen: 0 total, 0 older than 3 months, 1 pages in 3.9s
+2026-06-27 22:03:15,781 - __main__ - INFO - Starting scrape for: Nordrhein-Westfalen
+2026-06-27 22:03:15,781 - scraper.kleinanzeigen - INFO - Starting scrape for Nordrhein-Westfalen...
+2026-06-27 22:03:15,782 - scraper.kleinanzeigen - INFO - Scraping 8 real estate categories...
+2026-06-27 22:03:15,782 - scraper.kleinanzeigen - INFO - Scraping page 1 of category c198: https://www.kleinanzeigen.de/s-immobilien/nordrhein-westfalen/c198
+2026-06-27 22:03:18,727 - scraper.kleinanzeigen - ERROR - Error extracting listings from page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:18,727 - scraper.kleinanzeigen - INFO - Found 0 listings on page 1 of c198
+2026-06-27 22:03:18,727 - scraper.kleinanzeigen - ERROR - Error checking for next page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:18,727 - scraper.kleinanzeigen - INFO - Scraping page 1 of category c199: https://www.kleinanzeigen.de/s-immobilien/nordrhein-westfalen/c199
+2026-06-27 22:03:22,409 - scraper.kleinanzeigen - ERROR - Error extracting listings from page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:22,409 - scraper.kleinanzeigen - INFO - Found 0 listings on page 1 of c199
+2026-06-27 22:03:22,409 - scraper.kleinanzeigen - ERROR - Error checking for next page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:22,409 - scraper.kleinanzeigen - INFO - Scraping page 1 of category c200: https://www.kleinanzeigen.de/s-immobilien/nordrhein-westfalen/c200
+2026-06-27 22:03:24,949 - scraper.kleinanzeigen - ERROR - Error extracting listings from page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:24,949 - scraper.kleinanzeigen - INFO - Found 0 listings on page 1 of c200
+2026-06-27 22:03:24,949 - scraper.kleinanzeigen - ERROR - Error checking for next page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:24,949 - scraper.kleinanzeigen - INFO - Scraping page 1 of category c201: https://www.kleinanzeigen.de/s-immobilien/nordrhein-westfalen/c201
+2026-06-27 22:03:27,002 - scraper.kleinanzeigen - ERROR - Error extracting listings from page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:27,002 - scraper.kleinanzeigen - INFO - Found 0 listings on page 1 of c201
+2026-06-27 22:03:27,002 - scraper.kleinanzeigen - ERROR - Error checking for next page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:27,002 - scraper.kleinanzeigen - INFO - Scraping page 1 of category c202: https://www.kleinanzeigen.de/s-immobilien/nordrhein-westfalen/c202
+2026-06-27 22:03:29,884 - scraper.kleinanzeigen - ERROR - Error extracting listings from page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:29,884 - scraper.kleinanzeigen - INFO - Found 0 listings on page 1 of c202
+2026-06-27 22:03:29,885 - scraper.kleinanzeigen - ERROR - Error checking for next page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:29,885 - scraper.kleinanzeigen - INFO - Scraping page 1 of category c203: https://www.kleinanzeigen.de/s-immobilien/nordrhein-westfalen/c203
+2026-06-27 22:03:31,959 - scraper.kleinanzeigen - ERROR - Error extracting listings from page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:31,959 - scraper.kleinanzeigen - INFO - Found 0 listings on page 1 of c203
+2026-06-27 22:03:31,959 - scraper.kleinanzeigen - ERROR - Error checking for next page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:31,959 - scraper.kleinanzeigen - INFO - Scraping page 1 of category c204: https://www.kleinanzeigen.de/s-immobilien/nordrhein-westfalen/c204
+2026-06-27 22:03:34,111 - scraper.kleinanzeigen - ERROR - Error extracting listings from page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:34,111 - scraper.kleinanzeigen - INFO - Found 0 listings on page 1 of c204
+2026-06-27 22:03:34,111 - scraper.kleinanzeigen - ERROR - Error checking for next page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:34,111 - scraper.kleinanzeigen - INFO - Scraping page 1 of category c205: https://www.kleinanzeigen.de/s-immobilien/nordrhein-westfalen/c205
+2026-06-27 22:03:35,662 - scraper.kleinanzeigen - ERROR - Error extracting listings from page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:35,663 - scraper.kleinanzeigen - INFO - Found 0 listings on page 1 of c205
+2026-06-27 22:03:35,663 - scraper.kleinanzeigen - ERROR - Error checking for next page: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+2026-06-27 22:03:35,663 - scraper.kleinanzeigen - INFO - Fetching dates for 0 listings...
+2026-06-27 22:03:35,663 - scraper.kleinanzeigen - INFO - Completed scrape for Nordrhein-Westfalen: 0 total, 0 older than 3 months, 1 pages in 19.9s
