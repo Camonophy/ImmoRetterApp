@@ -164,4 +164,10 @@ def export_to_excel(result: ScrapeResult) -> Optional[str]:
         Path to created Excel file or None if failed
     """
     exporter = ExcelExporter()
-    return exporter.export_result(result)
+    filepath = exporter.export_result(result)
+    
+    # If no old listings were found, export all listings instead
+    if filepath is None and result.listings:
+        filepath = exporter.export_all_listings(result)
+    
+    return filepath

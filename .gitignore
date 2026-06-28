@@ -45,7 +45,6 @@ htmlcov/
 scraper.log
 
 # Data
-data/output/*.xlsx
 
 # Environment
 .env
@@ -55,3 +54,5 @@ data/output/*.xlsx
 # OS
 .DS_Store
 Thumbs.db
+# Test output files
+!data/output/Nordrhein-Westfalen_valid_listings_sample.xlsx
