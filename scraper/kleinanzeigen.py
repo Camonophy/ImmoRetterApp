@@ -211,9 +211,15 @@ class KleinanzeigenScraper:
         Returns:
             Updated list of Listing objects with dates fetched
         """
+        # Limit for testing purposes
+        max_listings = self.settings.MAX_LISTINGS_FOR_DATES
         updated_listings = []
         
         for i, listing in enumerate(listings):
+            # Limit for testing
+            if i >= max_listings:
+                logger.warning(f"Reached limit of {max_listings} listings for date fetching")
+                break
             # If we already have a date, skip
             if listing.date_posted or listing.date_parsed:
                 updated_listings.append(listing)

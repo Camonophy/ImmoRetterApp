@@ -22,6 +22,9 @@ class Settings:
     REQUEST_TIMEOUT = 30  # Request timeout in seconds
     MAX_RETRIES = 3  # Maximum retries for failed requests
     
+    # Date fetching configuration
+    MAX_LISTINGS_FOR_DATES = 500  # Maximum number of listings to fetch dates for (for testing)
+    
     # User agents for rotation
     USER_AGENTS = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
