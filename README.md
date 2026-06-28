@@ -1,6 +1,6 @@
 # Kleinanzeigen.de Real Estate Scraper
 
-A Python application that scrapes Kleinanzeigen.de for real estate listings in German Bundesländer, filters for listings older than 3 months, and exports the results to Excel.
+A Python application that scrapes Kleinanzeigen.de for real estate listings in German Bundeslaender, filters for listings older than 3 months, and exports the results to Excel.
 
 ## Prerequisites
 
@@ -47,7 +47,7 @@ venv\Scripts\activate     # On Windows
 # Install dependencies
 pip install -r requirements.txt
 
-# List available Bundesländer
+# List available Bundeslaender
 python main.py --list
 
 # Scrape a specific Bundesland
@@ -88,11 +88,11 @@ When you run the scraper with `python main.py --bundesland "Nordrhein-Westfalen"
 5. **Generate Category URLs**: Creates search URLs for all 8 real estate subcategories:
    - `c198` - Gewerbeimmobilien (Commercial real estate)
    - `c199` - Wohnungen (Apartments)
-   - `c200` - Huser (Houses)
+   - `c200` - Haeuser (Houses)
    - `c201` - Zimmer (Rooms)
    - `c202` - WG (Shared apartments)
-   - `c203` - Grundstcke (Plots of land)
-   - `c204` - Garagen/Stellpltze (Garages/parking spaces)
+   - `c203` - Grundstuecke (Plots of land)
+   - `c204` - Garagen/Stellplaetze (Garages/parking spaces)
    - `c205` - Ferienwohnungen (Vacation homes)
 
 ### Phase 3: Scraping Search Results
@@ -151,41 +151,41 @@ When you run the scraper with `python main.py --bundesland "Nordrhein-Westfalen"
 
 ## Features
 
-- 2705 Scrape real estate listings from Kleinanzeigen.de
-- 2705 Support for all 16 German Bundeslnder
-- 2705 Filter listings older than 3 months (90 days)
-- 2705 Export results to Excel with proper formatting
-- 2705 Robust date parsing for various Kleinanzeigen formats
-- 2705 Automatic date fetching from listing detail pages
-- 2705 Rate limiting to avoid being blocked
-- 2705 Comprehensive error handling and logging
-- 2705 CLI and interactive modes
-- 2705 Works with or without lxml parser
+- Scrape real estate listings from Kleinanzeigen.de
+- Support for all 16 German Bundeslaender
+- Filter listings older than 3 months (90 days)
+- Export results to Excel with proper formatting
+- Robust date parsing for various Kleinanzeigen formats
+- Automatic date fetching from listing detail pages
+- Rate limiting to avoid being blocked
+- Comprehensive error handling and logging
+- CLI and interactive modes
+- Works with or without lxml parser
 
 ## Project Structure
 
 ```
 kleinanzeigen-scraper/
-251c25002500 main.py                          # Main entry point
-251c25002500 README.md                        # This file
-251c25002500 PROJECT_PLAN.md                  # Detailed project plan
-251c25002500 IMPLEMENTATION_SUMMARY.md        # Implementation status
-251c25002500 FIXES_SUMMARY.md                 # Summary of fixes applied
-251c25002500 requirements.txt                 # Dependencies
-251c25002500 .env.example                     # Environment template
-251c25002500 .gitignore                       # Git ignore patterns
-251c25002500 test_basic.py                    # Basic tests
-251c25002500 config/
-2502   25142500 settings.py                  # Configuration
-251c25002500 scraper/
-2502   251c2500 __init__.py
-2502   251c2500 models.py                    # Data models
-2502   251c2500 utils.py                     # Utility functions
-2502   251c2500 kleinanzeigen.py             # Core scraping logic
-2502   25142500 exporter.py                  # Excel export
-25142500 data/
-    251c2500 bundesland_mapping.json      # Bundesland to URL mapping
-    25142500 output/                      # Excel files output
+├── main.py                          # Main entry point
+├── README.md                        # This file
+├── PROJECT_PLAN.md                  # Detailed project plan
+├── IMPLEMENTATION_SUMMARY.md        # Implementation status
+├── FIXES_SUMMARY.md                 # Summary of fixes applied
+├── requirements.txt                 # Dependencies
+├── .env.example                     # Environment template
+├── .gitignore                       # Git ignore patterns
+├── test_basic.py                    # Basic tests
+├── config/
+│   └── settings.py                  # Configuration
+├── scraper/
+│   ├── __init__.py
+│   ├── models.py                    # Data models
+│   ├── utils.py                     # Utility functions
+│   ├── kleinanzeigen.py             # Core scraping logic
+│   └── exporter.py                  # Excel export
+└── data/
+    ├── bundesland_mapping.json      # Bundesland to URL mapping
+    └── output/                      # Excel files output
 ```
 
 ## Documentation
