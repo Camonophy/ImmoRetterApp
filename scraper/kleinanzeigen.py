@@ -14,6 +14,7 @@ from requests.exceptions import RequestException
 
 from .models import Listing, ScrapeResult
 from .utils import (
+    get_parser,
     parse_kleinanzeigen_date,
     get_random_user_agent,
     generate_all_category_urls,
@@ -257,7 +258,7 @@ class KleinanzeigenScraper:
         listings = []
         
         try:
-            soup = BeautifulSoup(html, "lxml")
+            soup = BeautifulSoup(html, get_parser())
             
             # Find all listing cards - try different selectors
             # Modern Kleinanzeigen uses specific data-testid attributes
@@ -302,7 +303,7 @@ class KleinanzeigenScraper:
             True if next page exists
         """
         try:
-            soup = BeautifulSoup(html, "lxml")
+            soup = BeautifulSoup(html, get_parser())
             
             # Look for next page link - Kleinanzeigen uses different formats
             next_selectors = [

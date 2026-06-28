@@ -13,6 +13,21 @@ from .models import Listing
 from config.settings import Settings
 
 
+def get_parser():
+    """
+    Get the best available HTML parser for BeautifulSoup.
+    Tries lxml first, falls back to html.parser.
+    
+    Returns:
+        str: Parser name to use with BeautifulSoup
+    """
+    try:
+        import lxml
+        return "lxml"
+    except ImportError:
+        return "html.parser"
+
+
 def get_random_user_agent() -> str:
     """Get a random user agent from settings"""
     return random.choice(Settings.USER_AGENTS)
@@ -51,10 +66,13 @@ def generate_all_category_urls(bundesland_url_param: str, page: int = 1) -> List
         List of URLs for all real estate subcategories
     """
     base_url = Settings.BASE_URL.rstrip("/")
-    urls = []
     
-    for subcat in Settings.REAL_ESTATE_SUBCATEGORIES:
-        search_path = f"/s-immobilien/{bundesland_url_param}/{subcat}"
+    # Real estate category codes
+    real_estate_categories = ['c198', 'c199', 'c200', 'c201', 'c202', 'c203', 'c204', 'c205']
+    
+    urls = []
+    for cat in real_estate_categories:
+        search_path = f"/s-immobilien/{bundesland_url_param}/{cat}"
         if page == 1:
             urls.append(f"{base_url}{search_path}")
         else:
@@ -141,7 +159,7 @@ def parse_kleinanzeigen_date(date_str: str) -> Optional[datetime]:
     month_names = {
         "januar": 1, "jan": 1,
         "februar": 2, "feb": 2,
-        "märz": 3, "maerz": 3, "mar": 3,
+        "m\u00e4rz": 3, "maerz": 3, "mar": 3,
         "april": 4, "apr": 4,
         "mai": 5, "may": 5,
         "juni": 6, "jun": 6,
@@ -154,7 +172,7 @@ def parse_kleinanzeigen_date(date_str: str) -> Optional[datetime]:
     }
     
     # Handle "Monat YYYY" format (e.g., "Januar 2024")
-    match = re.match(r"([a-zäöü]+) (\d{4})", date_str)
+    match = re.match(r"([a-z\u00e4\u00f6\u00fc]+) (\d{4})", date_str)
     if match:
         month_name, year = match.groups()
         month_name = month_name.lower()
@@ -308,7 +326,9 @@ def fetch_listing_date(listing_url: str, session=None) -> Optional[str]:
         if response.status_code != 200:
             return None
         
-        soup = BeautifulSoup(response.text, 'lxml')
+        # Use the best available parser
+        parser = get_parser()
+        soup = BeautifulSoup(response.text, parser)
         
         # Look for date in various locations
         # Pattern 1: <i class="icon icon-small icon-calendar-gray-simple"></i><span>DATE</span>
