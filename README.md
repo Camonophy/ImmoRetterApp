@@ -1,6 +1,6 @@
 # Kleinanzeigen.de Real Estate Scraper
 
-A Python application that scrapes Kleinanzeigen.de for real estate listings in German Bundeslaender, filters for listings older than 3 months, and exports the results to Excel.
+A Python application that scrapes Kleinanzeigen.de for real estate listings in a German Bundesland, filters for listings that haven't been bumped in more than 3 months (90 days), and exports the results to Excel.
 
 ## Prerequisites
 
@@ -58,6 +58,9 @@ python main.py --bundesland "Bayern" --all
 
 # Run in interactive mode
 python main.py --interactive
+
+# Run the test suite
+python test_basic.py
 ```
 
 ## Alternative: Install without lxml
@@ -65,179 +68,152 @@ python main.py --interactive
 If you cannot install `lxml`, you can use Python's built-in HTML parser instead:
 
 ```bash
-# Install dependencies without lxml
 pip install requests beautifulsoup4 pandas openpyxl python-dateutil
-
-# The scraper will automatically fall back to html.parser
-python main.py --bundesland "Bayern"
 ```
 
 **Note**: The built-in `html.parser` is slower than `lxml` and may have slightly different parsing behavior, but it will work for most cases.
 
-## Step-by-Step Execution Process
+## What the Scraper Actually Does
 
-When you run the scraper with `python main.py --bundesland "Nordrhein-Westfalen"`, here's what happens:
+When you run `python main.py --bundesland "Nordrhein-Westfalen"`, the scraper:
 
 ### Phase 1: Initialization
-1. **Load Configuration**: Reads settings from `config/settings.py`
-2. **Validate Bundesland**: Checks if the provided Bundesland name is valid using `data/bundesland_mapping.json`
-3. **Setup Logging**: Initializes logging to both console and `scraper.log` file
-4. **Create Session**: Sets up HTTP session with random user agent and headers
+1. **Load Configuration**: Reads settings from `config/settings.py` and the Bundesland → locationId mapping from `data/bundesland_mapping.json`.
+2. **Validate Bundesland**: Looks up the requested Bundesland's `url_param` and **`location_id`** (a numeric ID that Kleinanzeigen uses internally to scope searches to a state). Without `location_id` the search returns nationwide results.
+3. **Setup Logging**: Initializes logging to console and `scraper.log`.
+4. **Create Session**: Sets up an HTTP session with a rotating User-Agent.
 
-### Phase 2: Category Setup
-5. **Generate Category URLs**: Creates search URLs for all 8 real estate subcategories:
-   - `c198` - Gewerbeimmobilien (Commercial real estate)
-   - `c199` - Wohnungen (Apartments)
-   - `c200` - Haeuser (Houses)
-   - `c201` - Zimmer (Rooms)
-   - `c202` - WG (Shared apartments)
-   - `c203` - Grundstuecke (Plots of land)
-   - `c204` - Garagen/Stellplaetze (Garages/parking spaces)
-   - `c205` - Ferienwohnungen (Vacation homes)
+### Phase 2: Build Search URLs
+For each configured subcategory (`mietwohnung`, `wohnung`, `haus`, … — 11 in total), the scraper builds a region-filtered URL of the form:
 
-### Phase 3: Scraping Search Results
-6. **Fetch Search Pages**: For each category, the scraper:
-   - Requests the search results page from Kleinanzeigen.de
-   - Waits 1-3 seconds between requests (rate limiting)
-   - Parses the HTML response using BeautifulSoup
-   - Extracts all listing cards from the page
+```
+https://www.kleinanzeigen.de/s-immobilien/<region>/<subcategory>/k0c195l<locationId>
+```
 
-7. **Extract Listing Information**: For each listing found:
-   - Extracts title from the listing card
-   - Extracts URL (link to the detail page)
-   - Extracts price (if available)
-   - Extracts location
-   - **Note**: Posting date is NOT extracted here (not available in search results)
+The `l<locationId>` suffix is what tells Kleinanzeigen to scope the search to the Bundesland; without it the site ignores the region slug in the path and returns nationwide results.
 
-8. **Pagination Handling**: The scraper continues to the next page if:
-   - A "next page" link is found in the HTML, OR
-   - The current page number is less than MAX_PAGES (50)
-   - Not all listings with dates are newer than 3 months
+### Phase 3: Paginate and Scrape Search Results
+For each subcategory the scraper walks pages until either it has checked all 25 pages (the safety limit) or the site stops offering a "next" link. From each result card it extracts:
 
-### Phase 4: Date Fetching
-9. **Fetch Detail Pages**: After scraping all search results, the scraper:
-   - Visits each listing's detail page
-   - Extracts the posting date from the detail page HTML
-   - Parses the date string (e.g., "28.11.2022") into a datetime object
-   - Calculates the age in days from the current date
+- **Title** (`<h2 class="text-module-begin"><a>`)
+- **URL** (from the title's `href` or the `data-href` attribute on the article)
+- **Price** (`<p class="aditem-main--middle--price-shipping--price">`)
+- **Location** (`<div class="aditem-main--top--left">`)
 
-10. **Determine Old Listings**: For each listing:
-    - If age > 90 days: marked as "older than 3 months"
-    - Otherwise: marked as new
+The **activation date is NOT extracted from the search results** — Kleinanzeigen loads it via JavaScript. The scraper fetches each listing's detail page in Phase 4.
 
-### Phase 5: Export Results
-11. **Filter Old Listings**: Creates a list of only the old listings
-12. **Generate Excel File**: Exports the results to an Excel file with columns:
-    - Title
-    - URL
-    - Price
-    - Location
-    - Date Posted
-    - Age (Days)
-    - Older than 3 months (Yes/No)
+### Phase 4: Fetch Activation Dates
+For each listing, the scraper visits the detail page and extracts the activation date from the calendar icon block:
 
-13. **Display Summary**: Prints a summary to the console:
-    - Total listings found
-    - Number of old listings found
-    - Number of pages scraped
-    - Duration of the scraping process
-    - Path to the exported Excel file
+```
+<div id="viewad-extra-info" class="boxedarticle--details--full">
+  <div>
+    <i class="icon icon-small icon-calendar-gray-simple"></i>
+    <span>24.06.2026</span>
+  </div>
+</div>
+```
 
-### Phase 6: Cleanup
-14. **Close Session**: Properly closes the HTTP session
-15. **Exit**: Program completes
+This date is the **last activation date** of the listing (i.e. when the seller last bumped it). Listings whose activation date is older than 90 days are exactly the "neglected" ones a buyer looking for stale inventory wants to find, so this IS the right signal.
 
-**Total Process**: The scraper typically processes 200-500+ listings across all categories and pages, fetching dates for each one, and finally exports the filtered results.
+The scraper deliberately ignores the seller's "Aktiv seit" date in the user profile (which is the seller's account age, not the listing's).
+
+### Phase 5: Filter and Export
+- Filter listings where `age_days > 90`.
+- Export to `<output_dir>/<Bundesland>_real_estate_old_listings_<timestamp>.xlsx` with sheets `Nordrhein-Westfalen Old Listings` (truncated to Excel's 31-char limit) and `Summary`.
+
+If no listings match the age filter, the file is **not** silently written with all listings under a misleading name — the script prints a clear "No listings older than 3 months found" message and tells you to re-run with `--all` if you want everything.
 
 ## Features
 
-- Scrape real estate listings from Kleinanzeigen.de
-- Support for all 16 German Bundeslaender
-- Filter listings older than 3 months (90 days)
-- Export results to Excel with proper formatting
-- Robust date parsing for various Kleinanzeigen formats
-- Automatic date fetching from listing detail pages
-- Rate limiting to avoid being blocked
-- Comprehensive error handling and logging
-- CLI and interactive modes
-- Works with or without lxml parser
+- Region-filtered search across all 16 German Bundesländer
+- 11 real estate subcategories (Mietwohnung, Wohnung, Haus, Eigentumswohnung, etc.)
+- Modern URL scheme with `locationId` so the search is actually scoped to the requested state
+- Activation-date extraction from listing detail pages (calendar icon in `viewad-extra-info`)
+- Proper handling of German relative date strings ("Heute", "vor 2 Monaten", etc.) and absolute dates ("24.06.2026")
+- 11-column Excel export with Title, URL, Price, Location, Date Posted, Age (Days), Older than 3 months flag
+- Summary sheet with per-run statistics
+- Random delay between requests (default 2-4 s) and rotating User-Agent
+- Fallback from `lxml` to Python's built-in `html.parser` if lxml is unavailable
+- Graceful error handling with per-page error collection
+- CLI mode and interactive mode
+- Test suite that actually reports failures (`python test_basic.py`)
 
 ## Project Structure
 
 ```
-kleinanzeigen-scraper/
-├── main.py                          # Main entry point
+ImmoRetterApp/
+├── main.py                          # Main entry point (CLI + interactive)
 ├── README.md                        # This file
-├── PROJECT_PLAN.md                  # Detailed project plan
-├── IMPLEMENTATION_SUMMARY.md        # Implementation status
-├── FIXES_SUMMARY.md                 # Summary of fixes applied
 ├── requirements.txt                 # Dependencies
-├── .env.example                     # Environment template
-├── .gitignore                       # Git ignore patterns
-├── test_basic.py                    # Basic tests
+├── test_basic.py                    # Test suite (real pass/fail reporting)
 ├── config/
 │   └── settings.py                  # Configuration
 ├── scraper/
 │   ├── __init__.py
-│   ├── models.py                    # Data models
-│   ├── utils.py                     # Utility functions
+│   ├── models.py                    # Data models (Listing, ScrapeResult)
+│   ├── utils.py                     # URL generation + date parsing + date fetching
 │   ├── kleinanzeigen.py             # Core scraping logic
 │   └── exporter.py                  # Excel export
 └── data/
-    ├── bundesland_mapping.json      # Bundesland to URL mapping
+    ├── bundesland_mapping.json      # Bundesland → url_param + location_id
     └── output/                      # Excel files output
 ```
 
-## Documentation
+## Configuration
 
-- [PROJECT_PLAN.md](PROJECT_PLAN.md) - Detailed project planning
-- [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) - Implementation status and next steps
-- [FIXES_SUMMARY.md](FIXES_SUMMARY.md) - Complete summary of all fixes applied
+You can tweak these in `config/settings.py`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `REQUEST_DELAY` | `(2, 4)` | Random delay in seconds between requests |
+| `MAX_PAGES` | `25` | Max pages scraped per subcategory (safety limit) |
+| `REQUEST_TIMEOUT` | `30` | HTTP timeout in seconds |
+| `MAX_RETRIES` | `3` | HTTP retries on transient errors |
+| `MAX_LISTINGS_FOR_DATES` | `None` | Optional cap on how many detail-page date fetches are made (None = no cap) |
+| `MIN_AGE_DAYS` | `90` | Listings whose activation date is older than this are exported |
+| `REAL_ESTATE_SUBCATEGORIES` | 11 slugs | Which subcategories to scrape |
+
+### Tuning for Faster Runs
+
+A full scrape of one Bundesland with default settings can take 30-60+ minutes (25 pages × 11 categories × ~3s delay + 1 detail-page fetch per listing × ~1s each). For quick experimentation, edit `config/settings.py`:
+
+```python
+MAX_PAGES = 3                       # only 3 pages per subcategory
+MAX_LISTINGS_FOR_DATES = 50         # cap detail-page date fetches at 50
+REQUEST_DELAY = (0.3, 0.6)          # aggressive delay
+```
+
+With these, a run against Bremen completes in about 90 seconds.
 
 ## Troubleshooting
 
 ### "Couldn't find a tree builder with the features you requested: lxml"
 
-This error occurs when `lxml` is not installed. Solutions:
+Either install lxml (see prerequisites above), or let the scraper fall back to `html.parser`:
 
-1. **Install lxml** (recommended for best performance):
-   ```bash
-   pip install lxml
-   ```
+```bash
+pip install requests beautifulsoup4 pandas openpyxl python-dateutil
+```
 
-2. **Install system dependencies** (Linux only):
-   ```bash
-   sudo apt-get install libxml2-dev libxslt1-dev python3-dev
-   pip install lxml
-   ```
-
-3. **Use built-in parser** (no installation needed):
-   - The code will automatically fall back to `html.parser` if `lxml` is not available
-   - No additional installation required
+The fallback is automatic; no code change needed.
 
 ### Rate Limited / Blocked
 
-If you're being rate limited:
-- Increase the delay between requests by modifying `REQUEST_DELAY` in `config/settings.py`
+- Increase `REQUEST_DELAY` in `config/settings.py`
 - Use a VPN or proxy
 - Try again later
 
-### No Results Found
+### No Old Listings Found
 
-If no old listings are found:
-- Try a different Bundesland
-- Check if there are actually old listings on Kleinanzeigen.de for that region
-- The scraper only finds listings that are explicitly older than 90 days
-- Note: In test environments, the system date might be in the future (e.g., 2026), so no listings will appear old
+- Try a different (larger) Bundesland — smaller ones like Bremen have very few stale listings.
+- Re-run with `--all` to inspect what came back.
+- Verify the search is region-filtered: check that the title of the search page includes "in <Bundesland>".
 
-## Contributing
+### Tests Fail
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
+The test suite in `test_basic.py` now actually reports failures. If you see ❌ markers, the corresponding functionality is broken — usually because a dependency is missing or `data/bundesland_mapping.json` is malformed.
 
-## License
+## Disclaimer
 
-This project is open source and available under the [MIT License](LICENSE).
-
----
-
-**Note**: This tool is for educational and personal use only. Web scraping may violate Kleinanzeigen.de's terms of service. Use responsibly and respect their servers.
+This tool is for educational and personal use only. Web scraping may violate Kleinanzeigen.de's terms of service. Use responsibly and respect their servers.

@@ -4,78 +4,116 @@ Settings and configuration for Kleinanzeigen.de Real Estate Scraper
 
 import os
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, List
 
 
 class Settings:
     """Application settings"""
-    
+
     # Base URLs
     BASE_URL = "https://www.kleinanzeigen.de"
-    # Use the base immobilien path without category filter
-    # This will return all real estate listings for the region
-    SEARCH_PATH = "/s-immobilien/{region}"
-    
+
+    # The umbrella "Immobilien" category on modern Kleinanzeigen.
+    # Sub-categories use the bare numeric code (e.g. c208 "Häuser zum Kauf").
+    IMMOBILIEN_CATEGORY = "c195"
+
+    # Query parameters always appended to every search URL.
+    # - posterType=PRIVATE: only show listings from private sellers. Without
+    #   this the default search surfaces commercial listings (e.g. real-estate
+    #   agencies that post hundreds of new listings daily), which bury the
+    #   private listings that have been sitting around.
+    # - sortingField=SORTING_DATE: newest activation first. The page-counter
+    #   advances until no more pages are returned; combined with the
+    #   >90-day filter, this surfaces old private listings.
+    DEFAULT_QUERY_PARAMS = "posterType=PRIVATE&sortingField=SORTING_DATE"
+
     # Request configuration
-    REQUEST_DELAY: Tuple[int, int] = (1, 3)  # Random delay between requests in seconds (reduced for faster scraping)
-    MAX_PAGES = 50  # Maximum pages to scrape (safety limit, reduced from 100)
-    REQUEST_TIMEOUT = 30  # Request timeout in seconds
-    MAX_RETRIES = 3  # Maximum retries for failed requests
-    
+    # (min_seconds, max_seconds) delay between requests. ~2s is a reasonable
+    # compromise between politeness and runtime.
+    REQUEST_DELAY: Tuple[int, int] = (2, 4)
+    MAX_PAGES = 25            # Safety limit per category (was 50)
+    REQUEST_TIMEOUT = 30      # Request timeout in seconds
+    MAX_RETRIES = 3           # Maximum retries for failed requests
+
     # Date fetching configuration
-    MAX_LISTINGS_FOR_DATES = 500  # Maximum number of listings to fetch dates for (for testing)
-    
+    # Limits how many listings per run we follow up with a detail-page fetch
+    # to grab the activation date. Default is None (no cap). Set to a small
+    # int ONLY for smoke-tests.
+    MAX_LISTINGS_FOR_DATES: int | None = None
+
+    # Sub-location walker settings
+    # When walking every city inside a Bundesland, we keep these limits to
+    # avoid hammering the server and to bound runtime:
+    #   - Each sub-location/category gets at most this many pages.
+    #   - Stop walking that sub-location as soon as we see a page with zero
+    #     private listings (the sub-location probably has none in that cat).
+    SUB_LOC_MAX_PAGES_PER_CATEGORY = 3
+    SUB_LOC_BREADTH_LIMIT = 100     # max sub-locations to walk per run
+
     # User agents for rotation
     USER_AGENTS = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/91.0.864.59 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0 Safari/537.36",
     ]
-    
+
     # File paths
     PROJECT_ROOT = Path(__file__).parent.parent
     DATA_DIR = PROJECT_ROOT / "data"
     OUTPUT_DIR = DATA_DIR / "output"
     BUNDESLAND_MAPPING_FILE = DATA_DIR / "bundesland_mapping.json"
-    
+
     # Logging
     LOG_LEVEL = "INFO"
     LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     LOG_FILE = PROJECT_ROOT / "scraper.log"
-    
+
     # Date filtering
     MIN_AGE_DAYS = 90  # Listings older than this will be included
-    
+
     # Excel output
     EXCEL_FILENAME_TEMPLATE = "{bundesland}_real_estate_old_listings_{timestamp}.xlsx"
     EXCEL_DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
-    
+
     # Headers for HTTP requests
     DEFAULT_HEADERS = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "de-DE,de;q=0.8,en-US;q=0.5,en;q=0.3",
-        "Accept-Encoding": "gzip, deflate",
+        "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
         "DNT": "1",
+        "Upgrade-Insecure-Requests": "1",
     }
-    
-    # Kleinanzeigen specific
-    REAL_ESTATE_CATEGORY = "k0"  # All real estate categories
-    
-    # Real estate subcategories to scrape
-    REAL_ESTATE_SUBCATEGORIES = [
-        "c198",  # Gewerbeimmobilien
-        "c199",  # Wohnungen
-        "c200",  # Häuser
-        "c201",  # Zimmer
-        "c202",  # WG
-        "c203",  # Grundstücke
-        "c204",  # Garagen/Stellplätze
-        "c205",  # Ferienwohnungen
+
+    # Real estate subcategories to scrape.
+    # Each entry uses the modern numeric category code on the URL path:
+    #   /s-immobilien/<region>/c<code>l<locationId>?<query>
+    # Slugs were tried but they only do free-text matching, not real category
+    # filtering. The numeric codes below were verified against live
+    # Kleinanzeigen.de on 2026-06-28 and map to:
+    #   c195 Immobilien (umbrella)
+    #   c196 Eigentumswohnung kaufen
+    #   c197 Garage & Lagerraum
+    #   c198 Weitere Immobilien
+    #   c199 Auf Zeit & WG
+    #   c203 Mietwohnung
+    #   c205 Häuser zur Miete
+    #   c207 Grundstücke & Gärten
+    #   c208 Häuser zum Kauf (e.g. the user's example listing)
+    REAL_ESTATE_SUBCATEGORIES: List[dict] = [
+        {"code": "c195", "label": "Immobilien (umbrella)"},
+        {"code": "c196", "label": "Eigentumswohnung kaufen"},
+        {"code": "c197", "label": "Garage & Lagerraum"},
+        {"code": "c198", "label": "Weitere Immobilien"},
+        {"code": "c199", "label": "Auf Zeit & WG"},
+        {"code": "c203", "label": "Mietwohnung"},
+        {"code": "c205", "label": "Häuser zur Miete"},
+        {"code": "c207", "label": "Grundstücke & Gärten"},
+        {"code": "c208", "label": "Häuser zum Kauf"},
     ]
-    
+
     # Validate and create directories
     @classmethod
     def validate_directories(cls):

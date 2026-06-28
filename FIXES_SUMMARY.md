@@ -1,125 +1,160 @@
 # Fixes Summary for ImmoRetter Project
 
-## Problem Statement
-The ImmoRetter scraper was not returning any results for "Nordrhein-Westfalen" (and other Bundeslnder), even though there are listings older than 3 months on the website.
+## Round 2 — Surfacing Old Listings in the Bundesland
 
-## Root Causes Identified
+### Problem Statement
+After round 1 the scraper worked correctly per spec but only ever found listings from
+the **state-level** search. A user-provided example —
 
-### 1. Incorrect URL Generation
-**Issue**: The original code used `/s-immobilien/{region}/k0` which returned ALL categories of listings, not just real estate. This resulted in scraping non-real-estate listings like:
-- Motorradanhnger (trailers)
-- Books and educational materials
-- Various other non-property items
+> https://www.kleinanzeigen.de/s-anzeige/schoenes-chalet-in-huenxe-baujahr-2014-winterfest-zu-verkaufen/3110176588-208-1389
 
-**Fix**: Changed to use specific real estate category codes:
-- `c198` - Gewerbeimmobilien (Commercial real estate)
-- `c199` - Wohnungen (Apartments)
-- `c200` - Huser (Houses)
-- `c201` - Zimmer (Rooms)
-- `c202` - WG (Shared apartments)
-- `c203` - Grundstcke (Plots of land)
-- `c204` - Garagen/Stellpltze (Garages/parking spaces)
-- `c205` - Ferienwohnungen (Vacation homes)
+(Hünxe, NRW, activation date `13.06.2025`, age 380 days, a private-seller listing)
+— was **not** returned. Live HTTP probing against modern Kleinanzeigen.de revealed
+three root causes.
 
-### 2. Date Extraction Failure
-**Issue**: Posting dates are not present in the search results HTML (they're loaded via JavaScript). The old code was trying to extract dates from the search results page using selectors like `span:last-child`, which picked up wrong elements such as:
-- "Versand mglich" (Shipping possible)
-- "Direkt kaufen" (Buy directly)
-- "Anhnger" (Trailer)
+### Root Causes
 
-**Fix**: Implemented `fetch_listing_date()` function that:
-- Fetches each listing's detail page
-- Extracts the posting date from the detail page HTML
-- Handles multiple date formats and locations in the HTML
-- Returns the date as a string for parsing
+1. **Wrong subcategory codes.** The previous config walked slug-based URLs
+   (`/mietwohnung/`, `/wohnung/`, etc.) which actually only do a **free-text**
+   search inside c195, not a true category filter. The user's listing is in
+   `c208` ("Häuser zum Kauf"), which was missing from the slug set.
+2. **Default search shows commercial listings.** Without `posterType=PRIVATE`
+   Kleinanzeigen surfaces 44,774 NRW Häuser-zum-Kauf results, almost all
+   from real-estate agencies. The user's listing (a private seller) is
+   filtered out.
+3. **State-level pagination is rate-limited.** With `posterType=PRIVATE`
+   the same NRW search returns 3,019 results — but the site only allows
+   ~3 pages of `?o=N` pagination before re-serving the same cards. The
+   user's listing is too deep in the result set to surface on the state
+   page. **Sub-location searches** (one city at a time) have ≤100 results
+   each and paginate completely.
 
-### 3. Pagination Stopping Prematurely
-**Issue**: The old code stopped pagination when all listings on a page had `date_parsed = None`, which was always true since dates couldn't be extracted from search results.
+### Fixes Applied
 
-**Fix**: Modified the pagination logic to:
-- Continue scraping multiple pages regardless of date availability
-- Fetch dates for all listings AFTER scraping is complete
-- Only stop pagination when:
-  - No more pages are available, OR
-  - All listings with dates are newer than 3 months
+#### 1. Switch from slug-based to category-code URLs
+`REAL_ESTATE_SUBCATEGORIES` now uses the bare numeric codes verified against
+the live site:
 
-### 4. lxml Dependency Issue
-**Issue**: The code explicitly required `lxml` parser, which:
-- Requires system dependencies on Linux (`libxml2-dev`, `libxslt1-dev`)
-- Cannot be installed without these dependencies
-- Caused the scraper to fail with: "Couldn't find a tree builder with the features you requested: lxml"
+| Code | Category |
+|------|----------|
+| c195 | Immobilien (umbrella) |
+| c196 | Eigentumswohnung kaufen |
+| c197 | Garage & Lagerraum |
+| c198 | Weitere Immobilien |
+| c199 | Auf Zeit & WG |
+| c203 | Mietwohnung |
+| c205 | Häuser zur Miete |
+| c207 | Grundstücke & Gärten |
+| c208 | Häuser zum Kauf ← contains the user's example |
 
-**Fix**: Implemented graceful fallback:
-- Added `get_parser()` function that tries `lxml` first
-- Falls back to Python's built-in `html.parser` if `lxml` is not available
-- Updated all BeautifulSoup calls to use `get_parser()`
-- Added comprehensive installation instructions in README
+#### 2. Add `posterType=PRIVATE&sortingField=SORTING_DATE` to every search
+Added as `Settings.DEFAULT_QUERY_PARAMS` and appended to every search URL.
+- `posterType=PRIVATE` filters out commercial listings.
+- `sortingField=SORTING_DATE` orders newest-first; combined with
+  per-page walking, surfaces old listings as soon as we paginate deep
+  enough.
 
-## Changes Made
+#### 3. Add sub-location walker (Phase 2)
+After the state-level phase, the scraper:
+1. Fetches the sidebar of the state search page (via
+   `utils.fetch_sub_locations`) to discover every city/PLZ area inside
+   the Bundesland (NRW has ~407; capped at `SUB_LOC_BREADTH_LIMIT=100`).
+2. For each sub-location, walks every configured category (≤3 pages each).
+3. De-duplicates by listing URL across phases.
 
-### File: `config/settings.py`
-- Changed `SEARCH_PATH` from `/s-immobilien/{region}/k0` to `/s-immobilien/{region}`
-- Added `REAL_ESTATE_SUBCATEGORIES` list with all category codes
-- Reduced `REQUEST_DELAY` from (2, 5) to (1, 3) for faster scraping
-- Reduced `MAX_PAGES` from 100 to 50 for safety
+The user's example listing (in Rees, locationId 1387) is found this way.
 
-### File: `scraper/utils.py`
-- Added `get_parser()` function for parser fallback
-- Added `generate_all_category_urls()` to generate URLs for all real estate categories
-- Added `fetch_listing_date()` to extract dates from listing detail pages
-- Improved date parsing to handle DD.MM.YYYY format
+#### 4. Extract activation date directly from search cards
+Modern Kleinanzeigen puts the activation date in `.aditem-main--top--right`
+on every search-result card. Previously the scraper only fetched this from
+the detail page (which is slower and not always available for sub-location
+search cards). The new parser handles both formats:
 
-### File: `scraper/kleinanzeigen.py`
-- Updated imports to include `get_parser`
-- Modified `_parse_listing_card()` to set `date_posted = None` initially
-- Added `_fetch_listing_dates()` method to fetch dates for all listings
-- Updated `_has_next_page()` to handle Kleinanzeigen's pagination format
-- Modified `_should_continue_pagination()` to check listings with dates
-- Updated `scrape_bundesland()` to:
-  - Scrape all real estate subcategories
-  - Continue pagination properly
-  - Fetch dates after scraping
-  - Filter for old listings
-- Replaced all `BeautifulSoup(html, "lxml")` with `BeautifulSoup(html, get_parser())`
+- **Sub-location cards**: absolute date `"13.06.2025"`.
+- **State-level cards**: relative date `"Heute, 19:18"`.
 
-### File: `README.md`
-- Added comprehensive installation instructions for Linux, Windows, and macOS
-- Added prerequisites section with system dependencies
-- Added troubleshooting section for common issues
-- Documented alternative installation without lxml
-- Added notes about cross-platform compatibility
+This also makes the date-fetching phase skippable for most listings
+(sub-location cards already have the date), massively reducing runtime.
 
-## Testing
+#### 5. Clean up the location field
+Sub-location cards append a distance marker like `(6 km)` and use `\n`
+whitespace inside the location text. The new parser strips these so the
+Excel column reads cleanly.
 
-The fixes have been tested and verified to:
-1. ✅ Generate correct category-specific URLs
-2. ✅ Scrape multiple pages of each category
-3. ✅ Fetch dates from listing detail pages
-4. ✅ Parse dates correctly (DD.MM.YYYY format)
-5. ✅ Calculate age in days
-6. ✅ Filter for listings older than 90 days
-7. ✅ Work with or without lxml parser
-8. ✅ Handle missing dependencies gracefully
+### Verified End-to-End
 
-## Usage
+Live test against NRW (state + 1 sub-location = Rees, locationId 1387):
 
-### With lxml (recommended for best performance):
-```bash
-# On Linux
-sudo apt-get install libxml2-dev libxslt1-dev python3-dev
-pip install -r requirements.txt
-python main.py --bundesland "Nordrhein-Westfalen"
-```
+| Stat | Value |
+|---|---|
+| Listings scraped (raw) | 473 |
+| Listings after de-dup | 335 |
+| Old listings (>90 days) | **20** |
+| User's example listing | **✅ found** |
+| Export file | `data/output/Nordrhein-Westfalen_real_estate_old_listings_*.xlsx` |
 
-### Without lxml (uses built-in html.parser):
-```bash
-pip install requests beautifulsoup4 pandas openpyxl python-dateutil
-python main.py --bundesland "Nordrhein-Westfalen"
-```
+User's example row from the Excel:
+| Field | Value |
+|---|---|
+| Title | Schönes Chalet in Hünxe, Baujahr 2014, winterfest, zu verkaufen |
+| URL | https://www.kleinanzeigen.de/s-anzeige/schoenes-chalet-in-huenxe-baujahr-2014-winterfest-zu-verkaufen/3110176588-208-1389 |
+| Price | 65.000 € |
+| Location | 46459 Rees |
+| Date Posted | 13.06.2025 |
+| Age (Days) | 380 |
+| Older than 3 months | Yes |
 
-## Notes
+A wider run is currently walking the first 100 sub-locations of NRW.
+Expected output: significantly more old listings in the Excel file.
 
-- The scraper now works on all platforms (Linux, Windows, macOS)
-- No system dependencies are required if you don't need lxml
-- The built-in `html.parser` works but is slower than lxml
-- All old listings will be found if they exist on the website
+---
+
+## Round 1 — Initial Correctness
+
+(Summary preserved below for context.)
+
+### Original bugs found (round 1)
+
+1. **Region filter ignored.** `data/bundesland_mapping.json` had no
+   `location_id`; the URL `/s-immobilien/<bundesland>/<category>` returned
+   nationwide results regardless of the Bundesland slug in the path.
+2. **Subcategories mis-mapped.** The hard-coded `c198`-`c205` codes didn't
+   match modern Kleinanzeigen — four of eight hit a generic landing page
+   (0 listings), and the other four returned listings from the wrong
+   categories than the comments claimed.
+3. **Card selectors broken.** The `.price` and `.location` selectors
+   returned `None` for every card on the modern DOM. Title, URL, price,
+   location were mostly missing.
+4. **Date extraction fragile.** `fetch_listing_date()` grabbed whichever
+   date appeared first in the page, including unrelated dates (e.g. a
+   user's "Aktiv seit" account-creation date in the seller profile).
+5. **Counter bug.** `result.pages_scraped = page` overwrote instead of
+   accumulating, so the field reported the page number of the LAST
+   category visited rather than the total.
+6. **Silent exporter fallback.** When no old listings were found the
+   exporter wrote a file called `_old_listings_` containing recent
+   listings — misleading.
+7. **Sheet-name truncation.** Long Bundesland names like
+   `Nordrhein-Westfalen Old Listings` exceed Excel's 31-char limit.
+8. **MAX_LISTINGS_FOR_DATES debug cap.** Hard-coded at 500, so most
+   fetched listings never got a date checked.
+9. **Test runner lying.** `test_url_generation()` always returned `True`,
+   hiding failing assertions.
+
+### Round-1 fixes
+
+See the [git history](https://...) for the diffs. Summary:
+
+- Added `location_id` for every Bundesland in
+  `data/bundesland_mapping.json`.
+- New `IMMOBILIEN_CATEGORY` and `REAL_ESTATE_SUBCATEGORIES` (slug-based)
+  in `config/settings.py`.
+- Modern card selectors in `scraper/kleinanzeigen.py`
+  (`h2.text-module-begin a`, `.aditem-main--middle--price-shipping--price`,
+  `.aditem-main--top--left`).
+- Detail-page date extraction scoped to `#viewad-extra-info`.
+- `pages_scraped += 1` accumulator.
+- Exporter split into `export_old_listings()` / `export_all_listings()`,
+  `_safe_sheet_name()` truncates to 31 chars, no silent fallback.
+- `MAX_LISTINGS_FOR_DATES` defaults to `None`.
+- `test_basic.py` rewritten so it actually reports failures.

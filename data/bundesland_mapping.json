@@ -2,97 +2,97 @@
   "Baden-Württemberg": {
     "name": "Baden-Württemberg",
     "url_param": "baden-wuerttemberg",
-    "region_id": "1",
+    "location_id": "7970",
     "english_name": "Baden-Wuerttemberg"
   },
   "Bayern": {
     "name": "Bayern",
     "url_param": "bayern",
-    "region_id": "2",
+    "location_id": "5510",
     "english_name": "Bavaria"
   },
   "Berlin": {
     "name": "Berlin",
     "url_param": "berlin",
-    "region_id": "3",
+    "location_id": "3331",
     "english_name": "Berlin"
   },
   "Brandenburg": {
     "name": "Brandenburg",
     "url_param": "brandenburg",
-    "region_id": "4",
+    "location_id": "7711",
     "english_name": "Brandenburg"
   },
   "Bremen": {
     "name": "Bremen",
     "url_param": "bremen",
-    "region_id": "5",
+    "location_id": "1",
     "english_name": "Bremen"
   },
   "Hamburg": {
     "name": "Hamburg",
     "url_param": "hamburg",
-    "region_id": "6",
+    "location_id": "9409",
     "english_name": "Hamburg"
   },
   "Hessen": {
     "name": "Hessen",
     "url_param": "hessen",
-    "region_id": "7",
+    "location_id": "4279",
     "english_name": "Hesse"
   },
   "Mecklenburg-Vorpommern": {
     "name": "Mecklenburg-Vorpommern",
     "url_param": "mecklenburg-vorpommern",
-    "region_id": "8",
+    "location_id": "61",
     "english_name": "Mecklenburg-Vorpommern"
   },
   "Niedersachsen": {
     "name": "Niedersachsen",
     "url_param": "niedersachsen",
-    "region_id": "9",
+    "location_id": "2428",
     "english_name": "Lower Saxony"
   },
   "Nordrhein-Westfalen": {
     "name": "Nordrhein-Westfalen",
     "url_param": "nordrhein-westfalen",
-    "region_id": "10",
+    "location_id": "928",
     "english_name": "North Rhine-Westphalia"
   },
   "Rheinland-Pfalz": {
     "name": "Rheinland-Pfalz",
     "url_param": "rheinland-pfalz",
-    "region_id": "11",
+    "location_id": "4938",
     "english_name": "Rhineland-Palatinate"
   },
   "Saarland": {
     "name": "Saarland",
     "url_param": "saarland",
-    "region_id": "12",
+    "location_id": "285",
     "english_name": "Saarland"
   },
   "Sachsen": {
     "name": "Sachsen",
     "url_param": "sachsen",
-    "region_id": "13",
+    "location_id": "3799",
     "english_name": "Saxony"
   },
   "Sachsen-Anhalt": {
     "name": "Sachsen-Anhalt",
     "url_param": "sachsen-anhalt",
-    "region_id": "14",
+    "location_id": "2165",
     "english_name": "Saxony-Anhalt"
   },
   "Schleswig-Holstein": {
     "name": "Schleswig-Holstein",
     "url_param": "schleswig-holstein",
-    "region_id": "15",
+    "location_id": "408",
     "english_name": "Schleswig-Holstein"
   },
   "Thüringen": {
     "name": "Thüringen",
     "url_param": "thueringen",
-    "region_id": "16",
+    "location_id": "3548",
     "english_name": "Thuringia"
   }
 }

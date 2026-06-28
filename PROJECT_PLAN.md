@@ -1,5 +1,7 @@
 # Kleinanzeigen.de Real Estate Scraper - Project Plan
 
+> ⚠️ **This document is the original project plan from 2024-08.** The actual current state of the project, the architecture that was implemented, and the bug history are documented in [README.md](README.md), [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) and [FIXES_SUMMARY.md](FIXES_SUMMARY.md). Kept here for historical reference only.
+
 ## 🎯 Project Overview
 
 ### Objective

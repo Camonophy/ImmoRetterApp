@@ -32,17 +32,10 @@ logger = logging.getLogger(__name__)
 
 
 def load_bundesland_mapping() -> dict:
-    """Load Bundesland to URL parameter mapping"""
+    """Load the full Bundesland mapping (name -> info dict)."""
     try:
         with open(Settings.BUNDESLAND_MAPPING_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        # Create a simple mapping of name to url_param
-        mapping = {}
-        for name, info in data.items():
-            mapping[name] = info["url_param"]
-        
-        return mapping
+            return json.load(f)
     except FileNotFoundError:
         logger.error(f"Bundesland mapping file not found: {Settings.BUNDESLAND_MAPPING_FILE}")
         return {}
@@ -52,211 +45,179 @@ def load_bundesland_mapping() -> dict:
 
 
 def get_available_bundeslaender() -> list:
-    """Get list of available Bundesländer"""
-    mapping = load_bundesland_mapping()
-    return sorted(mapping.keys())
+    """Return a sorted list of all configured Bundesländer."""
+    return sorted(load_bundesland_mapping().keys())
 
 
 def validate_bundesland(bundesland: str) -> tuple:
     """
-    Validate Bundesland input
-    
-    Args:
-        bundesland: Bundesland name to validate
-    
-    Returns:
-        Tuple of (is_valid, bundesland_name, url_param)
+    Validate a Bundesland name.
+
+    Returns (is_valid, display_name, url_param, location_id).
     """
     mapping = load_bundesland_mapping()
-    
-    # Check exact match
+
+    # Exact match
     if bundesland in mapping:
-        return True, bundesland, mapping[bundesland]
-    
-    # Check case-insensitive match
-    bundesland_lower = bundesland.lower()
-    for name, url_param in mapping.items():
-        if name.lower() == bundesland_lower:
-            return True, name, url_param
-    
-    # Check partial match
-    matches = [name for name in mapping.keys() if bundesland_lower in name.lower()]
+        info = mapping[bundesland]
+        return True, bundesland, info["url_param"], info.get("location_id")
+
+    # Case-insensitive match
+    bl_lower = bundesland.lower()
+    for name, info in mapping.items():
+        if name.lower() == bl_lower:
+            return True, name, info["url_param"], info.get("location_id")
+
+    # Partial match — only if unambiguous
+    matches = [name for name in mapping.keys() if bl_lower in name.lower()]
     if len(matches) == 1:
-        return True, matches[0], mapping[matches[0]]
-    elif len(matches) > 1:
-        return False, None, None  # Multiple matches - ambiguous
-    
-    return False, None, None
+        info = mapping[matches[0]]
+        return True, matches[0], info["url_param"], info.get("location_id")
+
+    return False, None, None, None
 
 
 def print_available_bundeslaender():
-    """Print list of available Bundesländer"""
+    """Print the list of available Bundesländer."""
     bundeslaender = get_available_bundeslaender()
-    
     print("\nAvailable Bundesländer:")
     print("-" * 40)
-    for i, bundesland in enumerate(bundeslaender, 1):
-        print(f"{i:2d}. {bundesland}")
+    for i, bl in enumerate(bundeslaender, 1):
+        print(f"{i:2d}. {bl}")
     print()
 
 
 def run_scrape(bundesland: str, export_all: bool = False) -> Optional[str]:
     """
-    Run the scraping process for a Bundesland
-    
+    Run the scraping process for a Bundesland.
+
     Args:
-        bundesland: Name of the Bundesland to scrape
-        export_all: If True, export all listings (not just old ones)
-    
+        bundesland: Display name of the Bundesland.
+        export_all: If True, export every listing (not just old ones).
+
     Returns:
-        Path to exported Excel file or None if failed
+        Path to the exported Excel file, or None if nothing was exported.
     """
-    # Validate Bundesland
-    is_valid, bundesland_name, url_param = validate_bundesland(bundesland)
-    
+    is_valid, bl_name, url_param, location_id = validate_bundesland(bundesland)
     if not is_valid:
         logger.error(f"Unknown Bundesland: {bundesland}")
         print(f"Error: Unknown Bundesland '{bundesland}'")
         print_available_bundeslaender()
         return None
-    
-    logger.info(f"Starting scrape for: {bundesland_name}")
-    print(f"Scraping real estate listings for: {bundesland_name}")
+
+    logger.info(f"Starting scrape for: {bl_name} (locationId={location_id})")
+    print(f"Scraping real estate listings for: {bl_name}")
     print("This may take a few minutes...")
-    
-    # Perform scraping
+
     try:
-        result = scrape_kleinanzeigen(bundesland_name, url_param)
+        result = scrape_kleinanzeigen(bl_name, url_param, location_id)
     except Exception as e:
         logger.error(f"Error during scraping: {e}")
         print(f"Error: {e}")
         return None
-    
-    # Export results
+
+    # Decide what to export
+    filepath = export_to_excel(result, allow_all_fallback=export_all)
     if export_all:
-        from scraper.exporter import ExcelExporter
-        exporter = ExcelExporter()
-        filepath = exporter.export_all_listings(result)
-    else:
-        filepath = export_to_excel(result)
-    
+        # --all: write everything we found
+        filepath = filepath or export_to_excel(result, allow_all_fallback=True)
+
+    print(f"\nSummary for {bl_name}:")
+    print(f"  Total listings found : {result.total_listings_found}")
+    print(f"  Older than 3 months  : {result.old_listings_found}")
+    print(f"  Pages scraped        : {result.pages_scraped}")
+    print(f"  Duration             : {result.duration_seconds:.1f} seconds")
+
     if filepath:
-        print(f"\n✅ Success!")
-        print(f"Found {result.total_listings_found} total listings")
-        print(f"Found {result.old_listings_found} listings older than 3 months")
-        print(f"Scraped {result.pages_scraped} pages in {result.duration_seconds:.1f} seconds")
-        print(f"\nExported to: {filepath}")
-        
-        if result.errors:
-            print(f"\n⚠️  {len(result.errors)} errors occurred during scraping")
-            for error in result.errors[:5]:  # Show first 5 errors
-                print(f"  - {error}")
+        kind = "all listings" if export_all else "old listings only"
+        print(f"\nExported ({kind}) to: {filepath}")
     else:
-        print("No old listings found or error during export")
-    
+        if export_all:
+            print("\nNo listings to export.")
+        else:
+            print("\nNo listings older than 3 months found.")
+            print("(Re-run with --all to export every listing regardless of age.)")
+
+    if result.errors:
+        print(f"\n{len(result.errors)} error(s) during scraping:")
+        for err in result.errors[:5]:
+            print(f"  - {err}")
+
     return filepath
 
 
 def interactive_mode():
-    """Run in interactive mode"""
+    """Run in interactive mode."""
     print("=" * 60)
     print("Kleinanzeigen.de Real Estate Scraper")
     print("=" * 60)
     print()
-    
-    # Show available Bundesländer
+
     print_available_bundeslaender()
-    
-    # Get user input
+
     while True:
         bundesland = input("Enter Bundesland name (or 'list' to show options, 'quit' to exit): ").strip()
-        
+
         if bundesland.lower() == 'quit':
             print("Goodbye!")
             break
-        elif bundesland.lower() == 'list':
+        if bundesland.lower() == 'list':
             print_available_bundeslaender()
             continue
-        elif not bundesland:
+        if not bundesland:
             continue
-        
-        # Ask about export option
+
         export_all = input("Export ALL listings or only old ones? (all/old, default: old): ").strip().lower()
         export_all_flag = export_all == 'all'
-        
-        # Run scrape
+
         run_scrape(bundesland, export_all_flag)
         print()
 
 
 def main():
-    """Main entry point"""
+    """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Kleinanzeigen.de Real Estate Scraper - Scrape real estate listings older than 3 months",
+        description="Kleinanzeigen.de Real Estate Scraper — scrape listings older than 3 months in a given Bundesland.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python main.py --bundesland "Bayern"
   python main.py -b "Nordrhein-Westfalen" --all
   python main.py --list
-  python main.py -i  # Interactive mode
+  python main.py -i
         """
     )
-    
-    parser.add_argument(
-        "-b", "--bundesland",
-        type=str,
-        help="Bundesland to scrape (e.g., 'Bayern', 'Nordrhein-Westfalen')"
-    )
-    
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Export ALL listings (not just those older than 3 months)"
-    )
-    
-    parser.add_argument(
-        "-l", "--list",
-        action="store_true",
-        help="List available Bundesländer and exit"
-    )
-    
-    parser.add_argument(
-        "-i", "--interactive",
-        action="store_true",
-        help="Run in interactive mode"
-    )
-    
-    parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Enable verbose logging"
-    )
-    
+
+    parser.add_argument("-b", "--bundesland", type=str,
+                        help="Bundesland to scrape (e.g. 'Bayern', 'Nordrhein-Westfalen')")
+    parser.add_argument("--all", action="store_true",
+                        help="Export ALL listings (not just those older than 3 months)")
+    parser.add_argument("-l", "--list", action="store_true",
+                        help="List available Bundesländer and exit")
+    parser.add_argument("-i", "--interactive", action="store_true",
+                        help="Run in interactive mode")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="Enable verbose (DEBUG) logging")
+
     args = parser.parse_args()
-    
-    # Handle verbose logging
+
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    
-    # List Bundesländer and exit
+
     if args.list:
         print_available_bundeslaender()
         return
-    
-    # Interactive mode
+
     if args.interactive:
         interactive_mode()
         return
-    
-    # Check if Bundesland is provided
+
     if not args.bundesland:
         parser.print_help()
         print("\nPlease specify a Bundesland with --bundesland or -b")
         print("Use --list to see available options")
         return
-    
-    # Run scrape with provided Bundesland
+
     run_scrape(args.bundesland, args.all)
 
 

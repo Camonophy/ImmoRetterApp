@@ -1,0 +1,10 @@
+Collecting requests==2.31.0 (from -r requirements.txt (line 4))
+  Using cached requests-2.31.0-py3-none-any.whl.metadata (4.6 kB)
+Collecting beautifulsoup4==4.12.2 (from -r requirements.txt (line 5))
+  Using cached beautifulsoup4-4.12.2-py3-none-any.whl.metadata (3.6 kB)
+Collecting lxml==4.9.3 (from -r requirements.txt (line 6))
+  Using cached lxml-4.9.3.tar.gz (3.6 MB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'error'
