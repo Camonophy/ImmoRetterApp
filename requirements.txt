@@ -1,29 +1,34 @@
-# Kleinanzeigen.de Real Estate Scraper Dependencies
+# Kleinanzeigen.de Real Estate Scraper - Dependencies
+# ImmoRetterApp - Production Ready (2026-06-28)
 
-# Core dependencies
-requests==2.31.0
-beautifulsoup4==4.12.2
-lxml==4.9.3
-pandas==2.1.4
-openpyxl==3.1.2
-python-dateutil==2.8.2
-python-dotenv==1.0.0
+# Core dependencies (required)
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+pandas>=2.1.4
+openpyxl>=3.1.2
+python-dateutil>=2.8.2
 
-# Optional: For dynamic content scraping
-selenium==4.15.2
-webdriver-manager==4.0.0
+# HTML parser (optional - falls back to html.parser if not installed)
+lxml>=4.9.3
 
-# For user agent rotation
-fake-useragent==1.4.0
+# Configuration
+python-dotenv>=1.0.0
 
-# For better date parsing
-pytz==2023.3.post1
+# Optional: For dynamic content scraping (not currently used in main flow)
+# selenium>=4.15.2
+# webdriver-manager>=4.0.0
 
-# For CLI interface
-click==8.1.7
+# Optional: For user agent rotation
+# fake-useragent>=1.4.0
 
-# For progress bars
-tqdm==4.66.1
+# Optional: For better date/time handling
+# pytz>=2023.3.post1
 
-# For logging
-colorlog==6.8.0
+# Optional: For CLI interface
+# click>=8.1.7
+
+# Optional: For progress bars
+# tqdm>=4.66.1
+
+# Optional: For colored logging
+# colorlog>=6.8.0
