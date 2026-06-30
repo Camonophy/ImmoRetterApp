@@ -1,15 +1,17 @@
 # Fixes Summary for ImmoRetter Project
 
-## Round 2 — Surfacing Old Listings in the Bundesland
+> **Note**: This document describes the historical fixes applied to the project. The current implementation uses **5 curated subcategories** (c196, c198, c203, c207, c208) as defined in `config/settings.py`. See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for the current state.
+
+## Round 2 \u2014 Surfacing Old Listings in the Bundesland
 
 ### Problem Statement
 After round 1 the scraper worked correctly per spec but only ever found listings from
-the **state-level** search. A user-provided example —
+the **state-level** search. A user-provided example \u2014
 
 > https://www.kleinanzeigen.de/s-anzeige/schoenes-chalet-in-huenxe-baujahr-2014-winterfest-zu-verkaufen/3110176588-208-1389
 
-(Hünxe, NRW, activation date `13.06.2025`, age 380 days, a private-seller listing)
-— was **not** returned. Live HTTP probing against modern Kleinanzeigen.de revealed
+(H\u00fcnxe, NRW, activation date `13.06.2025`, age 380 days, a private-seller listing)
+\u2014 was **not** returned. Live HTTP probing against modern Kleinanzeigen.de revealed
 three root causes.
 
 ### Root Causes
@@ -17,16 +19,16 @@ three root causes.
 1. **Wrong subcategory codes.** The previous config walked slug-based URLs
    (`/mietwohnung/`, `/wohnung/`, etc.) which actually only do a **free-text**
    search inside c195, not a true category filter. The user's listing is in
-   `c208` ("Häuser zum Kauf"), which was missing from the slug set.
+   `c208` ("H\u00e4user zum Kauf"), which was missing from the slug set.
 2. **Default search shows commercial listings.** Without `posterType=PRIVATE`
-   Kleinanzeigen surfaces 44,774 NRW Häuser-zum-Kauf results, almost all
+   Kleinanzeigen surfaces 44,774 NRW H\u00e4user-zum-Kauf results, almost all
    from real-estate agencies. The user's listing (a private seller) is
    filtered out.
 3. **State-level pagination is rate-limited.** With `posterType=PRIVATE`
-   the same NRW search returns 3,019 results — but the site only allows
+   the same NRW search returns 3,019 results \u2014 but the site only allows
    ~3 pages of `?o=N` pagination before re-serving the same cards. The
    user's listing is too deep in the result set to surface on the state
-   page. **Sub-location searches** (one city at a time) have ≤100 results
+   page. **Sub-location searches** (one city at a time) have \u2264100 results
    each and paginate completely.
 
 ### Fixes Applied
@@ -43,9 +45,11 @@ the live site:
 | c198 | Weitere Immobilien |
 | c199 | Auf Zeit & WG |
 | c203 | Mietwohnung |
-| c205 | Häuser zur Miete |
-| c207 | Grundstücke & Gärten |
-| c208 | Häuser zum Kauf ← contains the user's example |
+| c205 | H\u00e4user zur Miete |
+| c207 | Grundst\u00fccke & G\u00e4rten |
+| c208 | H\u00e4user zum Kauf \u2190 contains the user's example |
+
+> **Current state**: The implementation was later refined to use **5 curated categories** (c196, c198, c203, c207, c208) that are most useful for surfacing stale private-seller listings.
 
 #### 2. Add `posterType=PRIVATE&sortingField=SORTING_DATE` to every search
 Added as `Settings.DEFAULT_QUERY_PARAMS` and appended to every search URL.
@@ -59,7 +63,7 @@ After the state-level phase, the scraper:
 1. Fetches the sidebar of the state search page (via
    `utils.fetch_sub_locations`) to discover every city/PLZ area inside
    the Bundesland (NRW has ~407; capped at `SUB_LOC_BREADTH_LIMIT=100`).
-2. For each sub-location, walks every configured category (≤3 pages each).
+2. For each sub-location, walks every configured category (\u22643 pages each).
 3. De-duplicates by listing URL across phases.
 
 The user's example listing (in Rees, locationId 1387) is found this way.
@@ -90,15 +94,15 @@ Live test against NRW (state + 1 sub-location = Rees, locationId 1387):
 | Listings scraped (raw) | 473 |
 | Listings after de-dup | 335 |
 | Old listings (>90 days) | **20** |
-| User's example listing | **✅ found** |
+| User's example listing | **\u2705 found** |
 | Export file | `data/output/Nordrhein-Westfalen_real_estate_old_listings_*.xlsx` |
 
 User's example row from the Excel:
 | Field | Value |
 |---|---|
-| Title | Schönes Chalet in Hünxe, Baujahr 2014, winterfest, zu verkaufen |
+| Title | Sch\u00f6nes Chalet in H\u00fcnxe, Baujahr 2014, winterfest, zu verkaufen |
 | URL | https://www.kleinanzeigen.de/s-anzeige/schoenes-chalet-in-huenxe-baujahr-2014-winterfest-zu-verkaufen/3110176588-208-1389 |
-| Price | 65.000 € |
+| Price | 65.000 \u20ac |
 | Location | 46459 Rees |
 | Date Posted | 13.06.2025 |
 | Age (Days) | 380 |
@@ -109,7 +113,7 @@ Expected output: significantly more old listings in the Excel file.
 
 ---
 
-## Round 1 — Initial Correctness
+## Round 1 \u2014 Initial Correctness
 
 (Summary preserved below for context.)
 
@@ -119,7 +123,7 @@ Expected output: significantly more old listings in the Excel file.
    `location_id`; the URL `/s-immobilien/<bundesland>/<category>` returned
    nationwide results regardless of the Bundesland slug in the path.
 2. **Subcategories mis-mapped.** The hard-coded `c198`-`c205` codes didn't
-   match modern Kleinanzeigen — four of eight hit a generic landing page
+   match modern Kleinanzeigen \u2014 four of eight hit a generic landing page
    (0 listings), and the other four returned listings from the wrong
    categories than the comments claimed.
 3. **Card selectors broken.** The `.price` and `.location` selectors
@@ -133,7 +137,7 @@ Expected output: significantly more old listings in the Excel file.
    category visited rather than the total.
 6. **Silent exporter fallback.** When no old listings were found the
    exporter wrote a file called `_old_listings_` containing recent
-   listings — misleading.
+   listings \u2014 misleading.
 7. **Sheet-name truncation.** Long Bundesland names like
    `Nordrhein-Westfalen Old Listings` exceed Excel's 31-char limit.
 8. **MAX_LISTINGS_FOR_DATES debug cap.** Hard-coded at 500, so most
