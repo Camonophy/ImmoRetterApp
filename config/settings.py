@@ -77,6 +77,14 @@ class Settings:
     EXCEL_FILENAME_TEMPLATE = "{bundesland}_real_estate_old_listings_{timestamp}.xlsx"
     EXCEL_DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
 
+    # Global xlsx — single fixed filename that accumulates listings
+    # from every Bundesland run. Existing rows (matched by URL) are
+    # skipped on re-runs so the file only ever grows with newly
+    # discovered listings. See ExcelExporter.export_global() for the
+    # dedup implementation.
+    GLOBAL_FILENAME = "Global_real_estate_old_listings.xlsx"
+    GLOBAL_SHEET_NAME = "Global Old Listings"
+
     # Headers for HTTP requests
     DEFAULT_HEADERS = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -92,24 +100,25 @@ class Settings:
     #   /s-immobilien/<region>/c<code>l<locationId>?<query>
     # Slugs were tried but they only do free-text matching, not real category
     # filtering. The numeric codes below were verified against live
-    # Kleinanzeigen.de on 2026-06-28 and map to:
-    #   c195 Immobilien (umbrella)
+    # Kleinanzeigen.de on 2026-06-28.
+    #
+    # Curated set per user request: keep only the five categories that are
+    # actually useful for surfacing stale private-seller listings.
     #   c196 Eigentumswohnung kaufen
-    #   c197 Garage & Lagerraum
     #   c198 Weitere Immobilien
-    #   c199 Auf Zeit & WG
     #   c203 Mietwohnung
-    #   c205 Häuser zur Miete
     #   c207 Grundstücke & Gärten
     #   c208 Häuser zum Kauf (e.g. the user's example listing)
+    #
+    # Removed (use a full set if you need them again):
+    #   c195 Immobilien (umbrella — overlaps with the umbrella search)
+    #   c197 Garage & Lagerraum
+    #   c199 Auf Zeit & WG
+    #   c205 Häuser zur Miete
     REAL_ESTATE_SUBCATEGORIES: List[dict] = [
-        {"code": "c195", "label": "Immobilien (umbrella)"},
         {"code": "c196", "label": "Eigentumswohnung kaufen"},
-        {"code": "c197", "label": "Garage & Lagerraum"},
         {"code": "c198", "label": "Weitere Immobilien"},
-        {"code": "c199", "label": "Auf Zeit & WG"},
         {"code": "c203", "label": "Mietwohnung"},
-        {"code": "c205", "label": "Häuser zur Miete"},
         {"code": "c207", "label": "Grundstücke & Gärten"},
         {"code": "c208", "label": "Häuser zum Kauf"},
     ]

@@ -17,6 +17,7 @@ from typing import Optional
 from scraper.kleinanzeigen import scrape_kleinanzeigen
 from scraper.exporter import export_to_excel
 from scraper.models import ScrapeResult
+from scraper import ui
 from config.settings import Settings
 
 # Set up logging
@@ -87,17 +88,25 @@ def print_available_bundeslaender():
     print()
 
 
-def run_scrape(bundesland: str, export_all: bool = False) -> Optional[str]:
+def run_scrape(bundesland: str, export_all: bool = False,
+                use_ui: bool = False) -> Optional[str]:
     """
     Run the scraping process for a Bundesland.
 
     Args:
         bundesland: Display name of the Bundesland.
         export_all: If True, export every listing (not just old ones).
+        use_ui: If True, enable the optional terminal UI (ANSI colours
+            + a 4-phase progress bar). Disabled by default.
 
     Returns:
         Path to the exported Excel file, or None if nothing was exported.
     """
+    # Switch the module-level console on or off. All UI helpers below
+    # read from `ui.console`, so toggling it here is enough to gate the
+    # whole output channel.
+    ui.console = ui.Console(enabled=use_ui)
+
     is_valid, bl_name, url_param, location_id = validate_bundesland(bundesland)
     if not is_valid:
         logger.error(f"Unknown Bundesland: {bundesland}")
@@ -106,52 +115,93 @@ def run_scrape(bundesland: str, export_all: bool = False) -> Optional[str]:
         return None
 
     logger.info(f"Starting scrape for: {bl_name} (locationId={location_id})")
-    print(f"Scraping real estate listings for: {bl_name}")
-    print("This may take a few minutes...")
+    if use_ui:
+        ui.console.header(f"ImmoRetterApp — {bl_name}")
+    else:
+        print(f"Scraping real estate listings for: {bl_name}")
+        print("This may take a few minutes...")
 
     try:
-        result = scrape_kleinanzeigen(bl_name, url_param, location_id)
+        result = scrape_kleinanzeigen(bl_name, url_param, location_id,
+                                      console=ui.console)
     except Exception as e:
         logger.error(f"Error during scraping: {e}")
-        print(f"Error: {e}")
+        if use_ui:
+            ui.console.err(f"Error during scraping: {e}")
+        else:
+            print(f"Error: {e}")
         return None
 
-    # Decide what to export
+    # Decide what to export. The single global xlsx is the only
+    # output — see ExcelExporter.export_global(). With --all we
+    # write every listing from the run; otherwise we write only
+    # listings whose activation date is older than MIN_AGE_DAYS.
     filepath = export_to_excel(result, allow_all_fallback=export_all)
-    if export_all:
-        # --all: write everything we found
-        filepath = filepath or export_to_excel(result, allow_all_fallback=True)
 
-    print(f"\nSummary for {bl_name}:")
-    print(f"  Total listings found : {result.total_listings_found}")
-    print(f"  Older than 3 months  : {result.old_listings_found}")
-    print(f"  Pages scraped        : {result.pages_scraped}")
-    print(f"  Duration             : {result.duration_seconds:.1f} seconds")
+    if use_ui:
+        # Coloured summary block.
+        ui.console.header(f"Summary — {bl_name}")
+        ui.console.print(f"  Total listings found : {result.total_listings_found}", "white")
+        ui.console.print(f"  Older than 3 months  : {result.old_listings_found}", "white")
+        ui.console.print(f"  Pages scraped        : {result.pages_scraped}", "white")
+        ui.console.print(f"  Duration             : {result.duration_seconds:.1f} seconds", "white")
+        if result.new_global_rows:
+            ui.console.ok(f"  Added to global xlsx : {result.new_global_rows}")
+        if result.duplicate_global_rows:
+            ui.console.warn(f"  Skipped (duplicate)  : {result.duplicate_global_rows}")
+    else:
+        print(f"\nSummary for {bl_name}:")
+        print(f"  Total listings found : {result.total_listings_found}")
+        print(f"  Older than 3 months  : {result.old_listings_found}")
+        print(f"  Pages scraped        : {result.pages_scraped}")
+        print(f"  Duration             : {result.duration_seconds:.1f} seconds")
+        if result.new_global_rows or result.duplicate_global_rows:
+            print(f"  Added to global xlsx : {result.new_global_rows}")
+            print(f"  Skipped (duplicate)  : {result.duplicate_global_rows}")
 
     if filepath:
         kind = "all listings" if export_all else "old listings only"
-        print(f"\nExported ({kind}) to: {filepath}")
+        msg = f"Exported ({kind}) to: {filepath}"
+        if use_ui:
+            ui.console.ok(msg)
+        else:
+            print(f"\n{msg}")
     else:
         if export_all:
-            print("\nNo listings to export.")
+            msg = "No listings to export."
         else:
-            print("\nNo listings older than 3 months found.")
-            print("(Re-run with --all to export every listing regardless of age.)")
+            msg = ("No listings older than 3 months found.\n"
+                   "(Re-run with --all to export every listing "
+                   "regardless of age.)")
+        if use_ui:
+            ui.console.warn(msg)
+        else:
+            print(f"\n{msg}")
 
     if result.errors:
-        print(f"\n{len(result.errors)} error(s) during scraping:")
-        for err in result.errors[:5]:
-            print(f"  - {err}")
+        err_block = f"{len(result.errors)} error(s) during scraping:"
+        if use_ui:
+            ui.console.err(err_block)
+            for err in result.errors[:5]:
+                ui.console.err(f"  - {err}")
+        else:
+            print(f"\n{err_block}")
+            for err in result.errors[:5]:
+                print(f"  - {err}")
 
     return filepath
 
 
-def interactive_mode():
+def interactive_mode(use_ui: bool = False):
     """Run in interactive mode."""
-    print("=" * 60)
-    print("Kleinanzeigen.de Real Estate Scraper")
-    print("=" * 60)
-    print()
+    if use_ui:
+        ui.console = ui.Console(enabled=True)
+        ui.console.header("ImmoRetterApp — interactive mode")
+    else:
+        print("=" * 60)
+        print("Kleinanzeigen.de Real Estate Scraper")
+        print("=" * 60)
+        print()
 
     print_available_bundeslaender()
 
@@ -159,7 +209,10 @@ def interactive_mode():
         bundesland = input("Enter Bundesland name (or 'list' to show options, 'quit' to exit): ").strip()
 
         if bundesland.lower() == 'quit':
-            print("Goodbye!")
+            if use_ui:
+                ui.console.ok("Goodbye!")
+            else:
+                print("Goodbye!")
             break
         if bundesland.lower() == 'list':
             print_available_bundeslaender()
@@ -170,8 +223,9 @@ def interactive_mode():
         export_all = input("Export ALL listings or only old ones? (all/old, default: old): ").strip().lower()
         export_all_flag = export_all == 'all'
 
-        run_scrape(bundesland, export_all_flag)
-        print()
+        run_scrape(bundesland, export_all_flag, use_ui=use_ui)
+        if not use_ui:
+            print()
 
 
 def main():
@@ -198,6 +252,9 @@ Examples:
                         help="Run in interactive mode")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Enable verbose (DEBUG) logging")
+    parser.add_argument("--ui", action="store_true",
+                        help="Enable the optional terminal UI: ANSI "
+                             "colours and a 4-phase progress bar.")
 
     args = parser.parse_args()
 
@@ -209,7 +266,7 @@ Examples:
         return
 
     if args.interactive:
-        interactive_mode()
+        interactive_mode(use_ui=args.ui)
         return
 
     if not args.bundesland:
@@ -218,7 +275,7 @@ Examples:
         print("Use --list to see available options")
         return
 
-    run_scrape(args.bundesland, args.all)
+    run_scrape(args.bundesland, args.all, use_ui=args.ui)
 
 
 if __name__ == "__main__":

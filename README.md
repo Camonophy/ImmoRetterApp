@@ -59,6 +59,10 @@ python main.py --bundesland "Bayern" --all
 # Run in interactive mode
 python main.py --interactive
 
+# Run with the optional terminal UI (ANSI colours + progress bar)
+python main.py --bundesland "Bayern" --ui
+python main.py --interactive --ui
+
 # Run the test suite
 python test_basic.py
 ```
@@ -78,12 +82,14 @@ pip install requests beautifulsoup4 pandas openpyxl python-dateutil
 When you run `python main.py --bundesland "Nordrhein-Westfalen"`, the scraper:
 
 ### Phase 1: Initialization
+
 1. **Load Configuration**: Reads settings from `config/settings.py` and the Bundesland → locationId mapping from `data/bundesland_mapping.json`.
-2. **Validate Bundesland**: Looks up the requested Bundesland's `url_param` and **`location_id`** (a numeric ID that Kleinanzeigen uses internally to scope searches to a state). Without `location_id` the search returns nationwide results.
+2. **Validate Bundesland**: Looks up the requested Bundesland's `url_param` and `location_id` (a numeric ID that Kleinanzeigen uses internally to scope searches to a state). Without `location_id` the search returns nationwide results.
 3. **Setup Logging**: Initializes logging to console and `scraper.log`.
 4. **Create Session**: Sets up an HTTP session with a rotating User-Agent.
 
 ### Phase 2: Build Search URLs
+
 For each configured subcategory (`mietwohnung`, `wohnung`, `haus`, … — 11 in total), the scraper builds a region-filtered URL of the form:
 
 ```
@@ -93,6 +99,7 @@ https://www.kleinanzeigen.de/s-immobilien/<region>/<subcategory>/k0c195l<locatio
 The `l<locationId>` suffix is what tells Kleinanzeigen to scope the search to the Bundesland; without it the site ignores the region slug in the path and returns nationwide results.
 
 ### Phase 3: Paginate and Scrape Search Results
+
 For each subcategory the scraper walks pages until either it has checked all 25 pages (the safety limit) or the site stops offering a "next" link. From each result card it extracts:
 
 - **Title** (`<h2 class="text-module-begin"><a>`)
@@ -103,6 +110,7 @@ For each subcategory the scraper walks pages until either it has checked all 25 
 The **activation date is NOT extracted from the search results** — Kleinanzeigen loads it via JavaScript. The scraper fetches each listing's detail page in Phase 4.
 
 ### Phase 4: Fetch Activation Dates
+
 For each listing, the scraper visits the detail page and extracts the activation date from the calendar icon block:
 
 ```
@@ -119,8 +127,12 @@ This date is the **last activation date** of the listing (i.e. when the seller l
 The scraper deliberately ignores the seller's "Aktiv seit" date in the user profile (which is the seller's account age, not the listing's).
 
 ### Phase 5: Filter and Export
+
 - Filter listings where `age_days > 90`.
-- Export to `<output_dir>/<Bundesland>_real_estate_old_listings_<timestamp>.xlsx` with sheets `Nordrhein-Westfalen Old Listings` (truncated to Excel's 31-char limit) and `Summary`.
+- Apply two additional content filters to every search card before it is added to the dataset (see [scraper/utils.py](scraper/utils.py)): 
+  - **For-sale only.** Titles matching wanted-listing signals (`Suche`, `Gesucht`, `Bewerber`, `Tausch`, …) are dropped. Titles matching sell signals (`zu verkaufen`, `zu vermieten`, `biete`, …) are kept. Ambiguous titles are kept by default.
+  - **Price rule.** Listings whose price is missing OR whose only price signal is `VB` (Verhandlungsbasis) AND the lowest numeric price parsed is `< 1000 €` are dropped. Two-price ranges like `"43.900 € VB 59.000 €"` use the lower bound. `"550 € 700 €"` (no VB) is kept.
+- Export to the single fixed `data/output/Global_real_estate_old_listings.xlsx` (sheet `Global Old Listings`, truncated to Excel's 31-char limit) plus a `Summary` sheet. The global file accumulates listings across every run and every Bundesland — listings already present (matched by URL) are skipped, only newly discovered URLs are appended. The `Aktueller Wert (€)` column contains a comma-separated integer (e.g. `25,000`) — no `€`, no `VB`; rows with no parsable price have an empty cell.
 
 If no listings match the age filter, the file is **not** silently written with all listings under a misleading name — the script prints a clear "No listings older than 3 months found" message and tells you to re-run with `--all` if you want everything.
 
@@ -164,15 +176,15 @@ ImmoRetterApp/
 
 You can tweak these in `config/settings.py`:
 
-| Setting | Default | Meaning |
-|---|---|---|
-| `REQUEST_DELAY` | `(2, 4)` | Random delay in seconds between requests |
-| `MAX_PAGES` | `25` | Max pages scraped per subcategory (safety limit) |
-| `REQUEST_TIMEOUT` | `30` | HTTP timeout in seconds |
-| `MAX_RETRIES` | `3` | HTTP retries on transient errors |
-| `MAX_LISTINGS_FOR_DATES` | `None` | Optional cap on how many detail-page date fetches are made (None = no cap) |
-| `MIN_AGE_DAYS` | `90` | Listings whose activation date is older than this are exported |
-| `REAL_ESTATE_SUBCATEGORIES` | 11 slugs | Which subcategories to scrape |
+| Setting                   | Default  | Meaning                                                                    |
+|---------------------------|----------|----------------------------------------------------------------------------|
+| `REQUEST_DELAY`             | `(2, 4)`   | Random delay in seconds between requests                                   |
+| `MAX_PAGES`                 | `25`       | Max pages scraped per subcategory (safety limit)                           |
+| `REQUEST_TIMEOUT`           | `30`       | HTTP timeout in seconds                                                    |
+| `MAX_RETRIES`               | `3`        | HTTP retries on transient errors                                           |
+| `MAX_LISTINGS_FOR_DATES`    | `None`     | Optional cap on how many detail-page date fetches are made (None = no cap) |
+| `MIN_AGE_DAYS`              | `90`       | Listings whose activation date is older than this are exported             |
+| `REAL_ESTATE_SUBCATEGORIES` | 11 slugs | Which subcategories to scrape                                              |
 
 ### Tuning for Faster Runs
 

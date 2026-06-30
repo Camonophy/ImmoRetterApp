@@ -2,6 +2,7 @@
 Main scraping logic for Kleinanzeigen.de
 """
 
+import dataclasses
 import time
 import random
 import re
@@ -20,11 +21,16 @@ from .utils import (
     get_random_user_agent,
     generate_all_category_urls,
     fetch_listing_date,
+    fetch_listing_seller_name,
     build_page_url,
     build_subcategory_url,
     fetch_sub_locations,
+    parse_price_eur,
+    is_for_sale_listing,
+    is_excluded_by_price,
 )
 from config.settings import Settings
+from . import ui as _ui
 
 
 logger = logging.getLogger(__name__)
@@ -81,10 +87,34 @@ class KleinanzeigenScraper:
                     wait = 2 ** attempt * 5
                     logger.warning(f"Rate limited (429). Waiting {wait}s...")
                     time.sleep(wait)
+                    # Loop will retry (this attempt counts toward max_retries)
+                elif response.status_code in (403, 503):
+                    # Cloudflare / Akamai challenge pages and explicit
+                    # Service-Unavailable. Back off and retry.
+                    wait = 2 ** attempt * 10
+                    logger.warning(
+                        f"Server-challenge/transient ({response.status_code}). "
+                        f"Waiting {wait}s before retry {attempt + 1}/{max_retries + 1}..."
+                    )
+                    time.sleep(wait)
                 elif response.status_code == 404:
                     logger.warning(f"Page not found: {url}")
                     return None
+                elif response.status_code == 410:
+                    # Kleinanzeigen returns 410 ("Gone") both for genuinely
+                    # deleted listing URLs and as an anti-bot response
+                    # during heavy scraping. For category sub-loc URLs
+                    # (the URL shape we're seeing this on) the listing-page
+                    # absolutely should exist — treat as transient and
+                    # retry with exponential backoff.
+                    wait = 2 ** attempt * 10
+                    logger.warning(
+                        f"HTTP 410 (transient?): {url} — "
+                        f"waiting {wait}s before retry {attempt + 1}/{max_retries + 1}"
+                    )
+                    time.sleep(wait)
                 else:
+                    # Catch-all for 5xx, 408, etc.
                     logger.warning(f"HTTP {response.status_code}: {url}")
 
             except RequestException as e:
@@ -98,7 +128,7 @@ class KleinanzeigenScraper:
     # ------------------------------------------------------------------
     # Parsing
     # ------------------------------------------------------------------
-    def _parse_listing_card(self, card) -> Optional[Listing]:
+    def _parse_listing_card(self, card, parent_region: Optional[str] = None) -> Optional[Listing]:
         """
         Parse a single listing card from a search-results page.
 
@@ -148,11 +178,42 @@ class KleinanzeigenScraper:
             if price:
                 price = price.split("\n")[0].strip()
 
+            # ---- Filter: "for sale" only ----
+            # Some private sellers post wanted-ads (Suche / Gesucht /
+            # Bewerber) in the same subcategories as real offers. Drop
+            # them here so they never enter the dataset.
+            if not is_for_sale_listing(title):
+                logger.debug(f"Skip (wanted listing): {title!r}")
+                return None
+
+            # ---- Filter: price rule ----
+            # Per user spec: exclude listings whose only price signal is
+            # "VB" and less than 1000 €, or that have no price at all.
+            if is_excluded_by_price(price):
+                logger.debug(
+                    f"Skip (price rule): {title!r} price={price!r}"
+                )
+                return None
+
+            # Parse the price into a structured number so the exporter
+            # can write it as a pure integer (no "€", no "VB").
+            price_value, _has_vb = parse_price_eur(price)
+            price_eur = float(price_value) if price_value is not None else None
+
             # ---- Location ----
             loc_el = card.select_one(".aditem-main--top--left") \
                        or card.select_one("[class*='top--left']") \
                        or card.select_one(".location")
             location = loc_el.get_text(" ", strip=True) if loc_el else None
+
+            # The location text comes in two shapes:
+            #   "46459 Rees"            (5-digit PLZ + city, the common case)
+            #   "46459 Rees (3 km)"    (with distance marker, after strip)
+            #   "Rees"                  (city only, no PLZ — rare, e.g. when
+            #                            the listing is in a wider area)
+            # We extract the 5-digit PLZ into its own field and keep the
+            # city name in `location`.
+            postleitzahl = ""
             if location:
                 # Strip the unicode zero-width-space and any trailing
                 # distance markers like "(6 km)" that Kleinanzeigen appends
@@ -161,6 +222,32 @@ class KleinanzeigenScraper:
                 location = re.sub(r"\s*\(\d+\s*km\)\s*$", "", location).strip()
                 # Collapse internal whitespace runs (from \n in the source).
                 location = re.sub(r"\s+", " ", location)
+
+                m = re.match(r"^(\d{5})\s+(.+)$", location)
+                if m:
+                    postleitzahl = m.group(1)
+                    location = m.group(2).strip()
+                else:
+                    # No PLZ prefix — keep city name as-is, PLZ stays ""
+                    pass
+
+                # ---- Optional parent-region enrichment ----
+                # If we know the parent region (from the page
+                # breadcrumb, e.g. "Aachen") and the card-level
+                # location is the child (e.g. "Aachen-Mitte"), join
+                # them with " - " so the user sees the full
+                # geographical context: "Aachen - Aachen-Mitte".
+                #
+                # We ALWAYS prefix when the parent is known; the
+                # user's spreadsheet wants the explicit
+                # "City - District" format even if the card already
+                # shows "City-District" (which is ambiguous without
+                # the parent prefix).
+                if (parent_region
+                    and parent_region.lower() != "kleinanzeigen"
+                    and location
+                    and location.lower() != parent_region.lower()):
+                    location = f"{parent_region} - {location}"
 
             # ---- Activation date (present on every modern card) ----
             date_posted = None
@@ -187,9 +274,13 @@ class KleinanzeigenScraper:
                 title=title,
                 url=url,
                 price=price,
+                price_eur=price_eur,
                 location=location,
                 date_posted=date_posted,
                 date_parsed=date_parsed,
+                postleitzahl=postleitzahl,
+                # seller_name left as "" — populated later by
+                # _fetch_seller_names().
             )
 
         except Exception as e:
@@ -206,13 +297,67 @@ class KleinanzeigenScraper:
             if not cards:
                 cards = soup.select("article")
             logger.debug(f"Found {len(cards)} potential listing cards")
+
+            # Pull the parent region (city name) from the page
+            # breadcrumb so we can format `Standort` as
+            # "City - Sub-district".
+            parent_region = self._extract_page_region(soup)
+
             for card in cards:
-                listing = self._parse_listing_card(card)
+                listing = self._parse_listing_card(card, parent_region)
                 if listing:
                     listings.append(listing)
         except Exception as e:
             logger.error(f"Error extracting listings from page: {e}")
         return listings
+
+    def _extract_page_region(self, soup: BeautifulSoup) -> Optional[str]:
+        """
+        Pull the parent region name out of the Kleinanzeigen page
+        breadcrumb (e.g. "Kleinanzeigen Aachen" -> "Aachen").
+
+        Returns None on state-level or umbrella-category search pages,
+        where the breadcrumb is "Kleinanzeigen Immobilien ..." without
+        a city name between them.
+
+        Used to enrich the per-card ``Standort`` so it shows the
+        parent city as well as the sub-district (e.g.
+        "Aachen - Aachen-Mitte" rather than just "Aachen-Mitte").
+        """
+        try:
+            for el in soup.select('[class*="bread"]'):
+                txt = el.get_text(" ", strip=True)
+                if "Kleinanzeigen" not in txt:
+                    continue
+                # Two patterns we observe:
+                #   Sub-location: "Kleinanzeigen <Region> Immobilien <Cat> in <PLZ> ..."
+                #     -> <Region> is the city, between "Kleinanzeigen" and "Immobilien".
+                #   State-level:  "Kleinanzeigen Immobilien <Cat> ..."
+                #     -> no parent region (return None).
+                #
+                # We try the sub-location pattern first. If "Immobilien"
+                # appears IMMEDIATELY after "Kleinanzeigen" with only
+                # whitespace between, that's the umbrella-category
+                # breadcrumb — no region.
+                m = re.search(
+                    r"Kleinanzeigen\s+(?P<region>[A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-/]+?)\s+Immobilien\b",
+                    txt,
+                )
+                if m:
+                    region = m.group("region").strip()
+                    if (region
+                        and len(region) >= 2
+                        and region.lower() not in {"kleinanzeigen", "startseite",
+                                                   "de", "deutschland",
+                                                   "immobilien"}):
+                        return region
+                # Otherwise: state-level / umbrella-category / category-
+                # specific page (no city context). Stay None so we
+                # don't prefix the card location with "Immobilien".
+                return None
+        except Exception:
+            return None
+        return None
 
     def _has_next_page(self, html: str, current_page: int) -> bool:
         """
@@ -293,11 +438,15 @@ class KleinanzeigenScraper:
 
             if date_str:
                 date_parsed = parse_kleinanzeigen_date(date_str)
-                updated.append(Listing(
-                    title=listing.title,
-                    url=listing.url,
-                    price=listing.price,
-                    location=listing.location,
+                # IMPORTANT: when reconstructing the Listing from a
+                # detail-page fetch, preserve every other field too
+                # (postleitzahl, seller_name, price, price_eur, location).
+                # Otherwise Excel rows end up with empty columns even
+                # though the search card had the data. Using
+                # dataclasses.replace avoids having to re-list every
+                # field by hand and protects future fields too.
+                updated.append(dataclasses.replace(
+                    listing,
                     date_posted=date_str,
                     date_parsed=date_parsed,
                 ))
@@ -319,12 +468,82 @@ class KleinanzeigenScraper:
         return updated
 
     # ------------------------------------------------------------------
+    # Seller-name fetching (optional; needed for the Excel "Name of
+    # the seller" column).
+    # ------------------------------------------------------------------
+    def _fetch_seller_names(self, listings: List[Listing]) -> List[Listing]:
+        """
+        Fetch the seller display name for every listing that doesn't have
+        one yet, by hitting each detail page and parsing the user-profile
+        section.
+
+        This is a separate phase from ``_fetch_listing_dates`` because:
+
+          * It needs an extra HTTP request per listing (no name is on the
+            search card — only on the detail page). On a comprehensive
+            NRW run with ~1100+ old listings this adds ~30-60 min.
+          * Listing has already been de-duplicated before this point,
+            so we only visit each unique URL once.
+
+        Respects ``MAX_LISTINGS_FOR_DATES`` if set (None = no cap) for
+        consistency with ``_fetch_listing_dates``.
+        """
+        max_listings = self.settings.MAX_LISTINGS_FOR_DATES
+        updated: List[Listing] = []
+        processed = 0
+        skipped = 0
+        errors = 0
+
+        for i, listing in enumerate(listings):
+            if max_listings is not None and processed >= max_listings:
+                logger.warning(
+                    f"Reached MAX_LISTINGS_FOR_DATES cap of {max_listings}; "
+                    f"{len(listings) - i} listings will not have seller names fetched"
+                )
+                updated.extend(listings[i:])
+                break
+
+            if listing.seller_name:
+                updated.append(listing)
+                skipped += 1
+                continue
+
+            seller_name = fetch_listing_seller_name(listing.url, self.session)
+            processed += 1
+
+            # Use dataclasses.replace so every other field (price,
+            # price_eur, postleitzahl, dates) survives the detail-page
+            # fetch. Hand-rolling a Listing here is a data-loss bug
+            # waiting to happen every time a new field is added.
+            updated.append(dataclasses.replace(
+                listing,
+                seller_name=seller_name or "",
+            ))
+
+            if not seller_name:
+                errors += 1
+
+            if processed % 10 == 0:
+                logger.info(
+                    f"Seller-name fetch progress: {processed}/{len(listings) - skipped} "
+                    f"(skipped={skipped}, errors={errors})"
+                )
+
+        logger.info(
+            f"Seller-name fetch complete: {processed} fetched, "
+            f"{skipped} already had names, {errors} returned no name"
+        )
+        return updated
+
+    # ------------------------------------------------------------------
     # Top-level scraping
     # ------------------------------------------------------------------
     def scrape_bundesland(self, bundesland: str,
                           bundesland_url_param: str,
                           location_id: Optional[str] = None,
-                          walk_sub_locations: bool = True) -> ScrapeResult:
+                          walk_sub_locations: bool = True,
+                          console: Optional["_ui.Console"] = None
+                          ) -> ScrapeResult:
         """
         Scrape all real estate listings for a Bundesland.
 
@@ -359,6 +578,13 @@ class KleinanzeigenScraper:
             start_time=datetime.now(),
         )
 
+        # Resolve the console (None means no UI). All UI helpers are
+        # no-ops when console.enabled is False, so the code below can
+        # call them unconditionally.
+        console = console or _ui.console
+        if console.enabled:
+            console.header(f"Scraping {bundesland}")
+
         if location_id:
             logger.info(f"Starting scrape for {bundesland} (region-filtered via locationId={location_id})")
         else:
@@ -370,10 +596,13 @@ class KleinanzeigenScraper:
         # ----- Phase 1: state-level search -----
         category_urls = generate_all_category_urls(bundesland_url_param, location_id)
         logger.info(f"Phase 1: state-level search, {len(category_urls)} subcategories")
+        phase1 = console.progress(len(category_urls), label="Phase 1/4 state search")
         for cat_url in category_urls:
             slug = cat_url.split("/s-immobilien/")[-1].split("?")[0]
             logger.info(f"--- Category: {slug} ---")
             self._walk_paginated(cat_url, result)
+            phase1.update(suffix=slug)
+        phase1.finish()
 
         # ----- Phase 2: sub-location walker -----
         if walk_sub_locations and location_id:
@@ -387,16 +616,33 @@ class KleinanzeigenScraper:
                 )
                 sub_locs = sub_locs[:self.settings.SUB_LOC_BREADTH_LIMIT]
             logger.info(f"Phase 2: walking {len(sub_locs)} sub-locations inside {bundesland}")
+            phase2 = console.progress(len(sub_locs) if sub_locs else 1,
+                                      label="Phase 2/4 sub-locations")
             for sub in sub_locs:
                 logger.info(f"--- Sub-location: {sub['name']} (id={sub['id']}) ---")
                 for cat in Settings.REAL_ESTATE_SUBCATEGORIES:
                     sub_url = build_subcategory_url(cat["code"], sub["id"], page=1)
                     self._walk_paginated(sub_url, result,
                                          max_pages=self.settings.SUB_LOC_MAX_PAGES_PER_CATEGORY)
+                phase2.update(suffix=sub["name"])
+            phase2.finish()
 
         # ----- Phase 3: fetch activation dates -----
         logger.info(f"Fetching activation dates for {len(result.listings)} listings...")
+        phase3 = console.progress(len(result.listings) if result.listings else 1,
+                                  label="Phase 3/4 dates")
         result.listings = self._fetch_listing_dates(result.listings)
+        phase3.finish(suffix=f"{len(result.listings)} listings")
+
+        # ----- Phase 4: fetch seller display names -----
+        logger.info(f"Fetching seller names for {len(result.listings)} listings...")
+        phase4 = console.progress(len(result.listings) if result.listings else 1,
+                                  label="Phase 4/4 sellers")
+        result.listings = self._fetch_seller_names(result.listings)
+        phase4.finish(suffix=f"{len(result.listings)} listings")
+
+        if console.enabled:
+            console.ok(f"Scrape finished for {bundesland}")
 
         # De-duplicate by URL (sub-location walker can re-find listings
         # already seen at state level).
@@ -437,22 +683,74 @@ class KleinanzeigenScraper:
         while page <= page_cap:
             url = build_page_url(base_url, page)
             logger.info(f"Page {page}: {url}")
-            html = self._make_request(url)
-            if html is None:
+            listings = self._fetch_page_with_retry(url)
+            if not listings:
+                # Either a hard failure or all retries returned empty
+                # cards (Kleinanzeigen anti-bot). Skip this page rather
+                # than emit 27 empty listings into the export.
                 result.errors.append(f"Failed to fetch page {page} of {base_url}")
-                return
+                page += 1
+                continue
 
-            listings = self._extract_listings_from_page(html)
             result.listings.extend(listings)
             result.total_listings_found += len(listings)
             result.pages_scraped += 1
 
             logger.info(f"Found {len(listings)} listings on page {page}")
 
-            if not self._has_next_page(html, page):
+            if not self._has_next_page(self._last_html_for_pagination, page):
                 return
-
             page += 1
+
+    # Per-instance cache for the last fetched HTML (consumed by
+    # `_has_next_page` via `_walk_paginated`). Initialized in __init__
+    # below.
+    _last_html_for_pagination: str = ""
+
+    def _fetch_page_with_retry(self, url: str,
+                               max_attempts: int = 2) -> List:
+        """
+        Fetch a category-search page and parse its listings, with retry
+        for the case where Kleinanzeigen returns a rate-limited /
+        anti-bot page that contains zero populated ``.aditem`` cards.
+
+        Returns the parsed listings on success. Returns an empty list
+        when every attempt either failed at HTTP level or returned a
+        page without populated cards.
+        """
+        import time
+        for attempt in range(1, max_attempts + 1):
+            html = self._make_request(url)
+            if html is None:
+                continue
+            # Cache for _has_next_page
+            self._last_html_for_pagination = html
+
+            listings = self._extract_listings_from_page(html)
+            if not listings:
+                # Page returned no cards at all — likely a hard error.
+                continue
+
+            # Anti-bot check: if the page returned >= 5 cards but the
+            # ratio of populated PLZ cards is below 50%, it's almost
+            # certainly an anti-bot / rate-limit page (the real page
+            # would have 100% populated). Retry.
+            populated = sum(1 for L in listings if L.postleitzahl)
+            if populated < len(listings) * 0.5:
+                if attempt < max_attempts:
+                    # Short backoff
+                    wait = 3
+                    logger.warning(
+                        f"Anti-bot pattern detected on {url} "
+                        f"({populated}/{len(listings)} populated). "
+                        f"Backing off {wait}s before retry "
+                        f"{attempt + 1}/{max_attempts}..."
+                    )
+                    time.sleep(wait)
+                continue
+
+            return listings
+        return []
 
     def close(self):
         """Clean up resources"""
@@ -462,7 +760,9 @@ class KleinanzeigenScraper:
 def scrape_kleinanzeigen(bundesland: str,
                          bundesland_url_param: str,
                          location_id: Optional[str] = None,
-                         walk_sub_locations: bool = True) -> ScrapeResult:
+                         walk_sub_locations: bool = True,
+                         console: Optional["_ui.Console"] = None
+                         ) -> ScrapeResult:
     """
     Convenience function to scrape Kleinanzeigen for a Bundesland.
 
@@ -472,6 +772,9 @@ def scrape_kleinanzeigen(bundesland: str,
         location_id: Numeric locationId from bundesland_mapping.json.
         walk_sub_locations: If True (default), also walk every city-level
             search inside the state. Set to False for state-only scan.
+        console: Optional UI Console for coloured output + progress
+            bar. Pass the module-level ``ui.console`` from main.py when
+            the user passes --ui on the CLI. Default: no UI.
 
     Returns:
         ScrapeResult object.
@@ -480,6 +783,7 @@ def scrape_kleinanzeigen(bundesland: str,
     try:
         return scraper.scrape_bundesland(bundesland, bundesland_url_param,
                                         location_id,
-                                        walk_sub_locations=walk_sub_locations)
+                                        walk_sub_locations=walk_sub_locations,
+                                        console=console)
     finally:
         scraper.close()
